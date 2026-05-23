@@ -1,6 +1,11 @@
 # minimal_chat_v1
 
-第 02 篇配套：**只调 Chat API + 多轮 messages**，暂不带头部的 `system`。
+**最小 AI 聊天 Agent（终端版）**
+
+用 Python 调用大模型的 **Chat 接口**，在程序里保存并累积多轮对话（`messages` 列表）。  
+每一轮都会把**整段历史**发给模型，所以它能「记得」你前面说过的话。
+
+> 本示例**不含**系统提示词（`system` 角色），只演示 Agent 最基础的一环：维护对话 + 调 API。
 
 ## 环境
 
@@ -55,12 +60,8 @@ python minimal_agent.py
 
 | 有 | 无 |
 |----|-----|
-| `chat.completions` 多轮对话 | `system` → **system_prompt_v2** |
+| `chat.completions` 多轮对话 | 系统提示词（`system`） |
 | 可选 temperature、max_tokens | 工具、ReAct |
-
-## 下一版本
-
-- **system_prompt_v2**（第 03 篇）：读 `system.txt`，`messages` 开头加 `system` 角色。
 
 ---
 

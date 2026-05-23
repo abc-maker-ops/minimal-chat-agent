@@ -1,8 +1,10 @@
 # mechanism_viewer_v1
 
-第 02 篇配套：**Windows / macOS / Linux 桌面客户端**（Python 自带 tkinter，无需浏览器）。
+**机制查看器（桌面窗口版）**
 
-与 `minimal_chat_v1` 共用 `agent_session.py`：左侧聊天，右侧看机制关键值。
+与 `minimal_chat_v1` 同一套对话逻辑，但用**桌面小窗口**操作：左边聊天，右边实时显示 messages 条数、Token、完整 JSON 等，方便理解 Agent 在后台到底传了什么。
+
+使用 Python 自带的 **tkinter** 画界面，**不用打开浏览器**；Windows / macOS / Linux 均可运行。
 
 ## 能看到什么
 
