@@ -16,3 +16,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# 本地推送用（绕过 kkgithub 镜像）
+.gitconfig-push
