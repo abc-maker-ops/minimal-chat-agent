@@ -1,0 +1,19 @@
+# 开源发布范围：minimal_chat_v1 + mechanism_viewer_v1
+# 本地 epoch 目录（system_prompt_v2 等）暂不纳入本仓库
+
+# 未在本仓库跟踪的 agent_lab 子目录
+/system_prompt_v2/
+/02_minimal_agent/
+
+# Python / 环境
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
