@@ -1,7 +1,6 @@
-# 开源发布范围：minimal_chat_v1 + mechanism_viewer_v1
-# 本地 epoch 目录（system_prompt_v2 等）暂不纳入本仓库
+# 开源发布：minimal_chat_v1、mechanism_viewer_v1/v2、system_prompt_v2
 
-# 未纳入本开源仓库的本地实验目录
+# 未纳入开源仓库的本地实验目录
 /02_minimal_agent/
 
 # Python / 环境

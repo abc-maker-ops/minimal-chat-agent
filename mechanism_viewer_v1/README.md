@@ -1,49 +1,36 @@
 # mechanism_viewer_v1
 
-**机制查看器（桌面窗口版）**
+**机制查看器（桌面窗口版）** — 系列统一 UI 入口。
 
-与 `minimal_chat_v1` 同一套对话逻辑，但用**桌面小窗口**操作：左边聊天，右边实时显示 messages 条数、Token、完整 JSON 等，方便理解 Agent 在后台到底传了什么。
+与 `minimal_chat_v1`、`system_prompt_v2` 共用同一程序；**窗口顶部下拉框** 可切换 Agent 版本：
 
-使用 Python 自带的 **tkinter** 画界面，**不用打开浏览器**；Windows / macOS / Linux 均可运行。
+| 选项 | 说明 |
+|------|------|
+| 第02篇 · minimal_chat_v1 | 仅 user/assistant |
+| 第03篇 · system + Few-shot | system + 3 组范例（默认本篇实验） |
+| 第03篇 · system（Zero-shot） | 仅 system，无范例 |
 
-## 能看到什么
-
-| 标签页 | 内容 |
-|--------|------|
-| 机制面板 | 模型、接口、temperature、轮次、messages 条数、Token 本轮/累计 |
-| messages JSON | 当前发给 API 的完整 `messages` 列表 |
-
-## 环境
+## 运行
 
 ```powershell
 $env:ZHIPU_API_KEY="你的Key"
 cd mechanism_viewer_v1
 pip install -r requirements.txt
-```
-
-可选：在 `minimal_chat_v1` 目录放 `.env` 配置 `ZHIPU_MODEL`、`OPENAI_TEMPERATURE` 等。
-
-## 运行
-
-```bash
 python mechanism_client.py
 ```
 
-会弹出独立窗口（不是网页）。发送时在后台线程调 API，界面不会卡死。
+Windows 可双击 **`启动机制查看器.bat`**（默认第 02 篇 v1）。
 
-## 建议实验
+环境变量 `MECHANISM_AGENT_VERSION` 可指定启动版本：`v1_minimal`、`v2_fewshot`、`v2_zeroshot`。
 
-1. 问「我叫小明。」再问「我叫什么？」→ 看 **messages 条数** 与 JSON 变化。  
-2. 多聊几轮 → 看 **本轮输入 Token** 是否上升。  
-3. 「清空会话」→ 计数归零。
+`mechanism_viewer_v2/`、`system_prompt_v2/mechanism_client.py` 为便捷启动，默认 `v2_fewshot`。
 
-## 与 CLI
+## 标签页
 
-- 终端：`minimal_chat_v1/minimal_agent.py`  
-- 本目录：同一套逻辑，适合投屏演示机制数值。
+| 标签页 | 内容 |
+|--------|------|
+| 机制面板 | 版本、模型、轮次、messages 条数、Token |
+| messages JSON | 内存中维护的 `messages` 列表（Agent 视角） |
+| API 原始报文 | 最近一轮 **发送 → LLM** 的请求体与 **LLM → 返回** 的原始 JSON |
 
----
-
-## 来源与关注
-
-本代码来源于微信公众号 **「新时代软开」** 的 AI Agent 开发系列教程。欢迎关注公众号，获取图文教程与后续篇章代码更新。
+切换版本会保留聊天区历史，并插入分隔线；右侧机制面板随新版本重置。v2「清空会话」会保留 system / Few-shot 种子。

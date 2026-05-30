@@ -2,10 +2,12 @@
 """minimal_chat_v1 共享会话逻辑：CLI 与机制查看客户端共用。"""
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field
 
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -84,6 +86,17 @@ class TurnUsage:
 
 
 @dataclass
+class TurnRecord:
+    """单轮对话完整记录（供机制查看器浏览历史）。"""
+    round: int
+    request: dict[str, Any]
+    response: dict[str, Any] | None
+    messages_after: list[dict]
+    usage: TurnUsage | None = None
+    error: str | None = None
+
+
+@dataclass
 class MechanismSnapshot:
     """一轮对话后的机制关键值（教学用）。"""
     round: int
@@ -96,6 +109,8 @@ class MechanismSnapshot:
     cumulative_total_tokens: int
     config: SessionConfig
     messages: list[dict] = field(repr=False)
+    last_request: dict[str, Any] | None = None
+    last_response: dict[str, Any] | None = None
 
 
 def load_config() -> SessionConfig:
@@ -118,6 +133,9 @@ class AgentSession:
         self.cumulative_completion = 0
         self.cumulative_total = 0
         self._last_usage: TurnUsage | None = None
+        self._last_request: dict[str, Any] | None = None
+        self._last_response: dict[str, Any] | None = None
+        self.turn_history: list[TurnRecord] = []
 
     def _approx_chars(self) -> int:
         return sum(len(str(m.get("content", ""))) for m in self.messages)
@@ -134,17 +152,38 @@ class AgentSession:
             cumulative_total_tokens=self.cumulative_total,
             config=self.config,
             messages=list(self.messages),
+            last_request=self._last_request,
+            last_response=self._last_response,
         )
+
+    @staticmethod
+    def _serialize_api_response(response: Any) -> dict[str, Any]:
+        if hasattr(response, "model_dump"):
+            return response.model_dump()
+        if hasattr(response, "dict"):
+            return response.dict()
+        return {"raw": repr(response)}
 
     def chat(self, user_text: str) -> tuple[str, MechanismSnapshot]:
         self.messages.append({"role": "user", "content": user_text})
-        kwargs: dict = {"model": self.config.model, "messages": self.messages}
+        body: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": copy.deepcopy(self.messages),
+        }
         if self.config.temperature is not None:
-            kwargs["temperature"] = self.config.temperature
+            body["temperature"] = self.config.temperature
         if self.config.max_tokens is not None:
-            kwargs["max_tokens"] = self.config.max_tokens
+            body["max_tokens"] = self.config.max_tokens
 
-        response = self.client.chat.completions.create(**kwargs)
+        self._last_request = {
+            "method": "POST",
+            "path": "/chat/completions",
+            "base_url": self.config.base_url,
+            "body": body,
+        }
+
+        response = self.client.chat.completions.create(**body)
+        self._last_response = self._serialize_api_response(response)
         assistant_text = response.choices[0].message.content or ""
         self.messages.append({"role": "assistant", "content": assistant_text})
 
@@ -161,6 +200,15 @@ class AgentSession:
             self.cumulative_total += usage.total_tokens
 
         self.round_count += 1
+        self.turn_history.append(
+            TurnRecord(
+                round=self.round_count,
+                request=copy.deepcopy(self._last_request),
+                response=copy.deepcopy(self._last_response),
+                messages_after=copy.deepcopy(self.messages),
+                usage=self._last_usage,
+            )
+        )
         return assistant_text, self.snapshot()
 
     def rollback_last_user(self) -> None:
@@ -174,4 +222,22 @@ class AgentSession:
         self.cumulative_completion = 0
         self.cumulative_total = 0
         self._last_usage = None
+        self._last_request = None
+        self._last_response = None
+        self.turn_history.clear()
         return self.snapshot()
+
+    def record_failed_turn(self, error: str) -> None:
+        """API 失败时记入历史（便于在原始报文中查看失败请求）。"""
+        if not self._last_request:
+            return
+        self.turn_history.append(
+            TurnRecord(
+                round=self.round_count + 1,
+                request=copy.deepcopy(self._last_request),
+                response=None,
+                messages_after=copy.deepcopy(self.messages),
+                usage=None,
+                error=error,
+            )
+        )
