@@ -1,0 +1,70 @@
+# Harness v1 CI pipeline for agent_lab (AI Agent tutorial code).
+# Push to Harness with: /create-pipeline-v1 then harness_create(resource_type=pipeline_v1)
+# Or ask: "Create this pipeline in Harness project <your-project>"
+
+pipeline:
+  name: agent-lab-ci
+  identifier: agent_lab_ci
+  description: >-
+    CI for 新时代软开 AI Agent 系列配套代码：离线 smoke test + 可选 Few-shot 对照（需 ZHIPU_API_KEY）。
+  on:
+    - push:
+        branches: [main]
+    - pull_request:
+        branches: [main]
+  inputs:
+    run_llm_contrast:
+      type: boolean
+      default: false
+      description: 为 true 时运行 test_fewshot_contrast.py（Harness Secret 须配置 ZHIPU_API_KEY）
+  stages:
+    - name: smoke-test
+      runtime: cloud
+      platform:
+        os: linux
+        arch: amd64
+      steps:
+        - run:
+            container: python:3.12
+            script: |
+              set -euo pipefail
+              cd agent_lab
+              pip install -q -r minimal_chat_v1/requirements.txt
+              pip install -q -r system_prompt_v2/requirements.txt
+              python scripts/ci_smoke_test.py
+        - parallel:
+            steps:
+              - run:
+                  container: python:3.12
+                  script: |
+                    set -euo pipefail
+                    cd agent_lab/minimal_chat_v1
+                    pip install -q -r requirements.txt
+                    python -m compileall -q .
+              - run:
+                  container: python:3.12
+                  script: |
+                    set -euo pipefail
+                    cd agent_lab/system_prompt_v2
+                    pip install -q -r requirements.txt
+                    python -m compileall -q .
+    - if: ${{ inputs.run_llm_contrast == true }}
+      name: fewshot-contrast
+      runtime: cloud
+      platform:
+        os: linux
+        arch: amd64
+      steps:
+        - run:
+            container: python:3.12
+            script: |
+              set -euo pipefail
+              cd agent_lab/system_prompt_v2
+              pip install -q -r requirements.txt
+              if [ -z "${ZHIPU_API_KEY:-}" ]; then
+                echo "ZHIPU_API_KEY not set — skip LLM contrast stage"
+                exit 1
+              fi
+              python test_fewshot_contrast.py
+            env:
+              ZHIPU_API_KEY: ${{ secrets.get('ZHIPU_API_KEY') }}

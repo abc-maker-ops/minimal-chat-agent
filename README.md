@@ -5,9 +5,10 @@
 | 目录 | 说明 |
 |------|------|
 | [`minimal_chat_v1/`](minimal_chat_v1/) | **第 02 篇 · 终端 CLI**（无 system） |
-| [`mechanism_viewer_v1/`](mechanism_viewer_v1/) | **机制查看器**（桌面 GUI；顶部可切换 v1 / v2 Few-shot / v2 Zero-shot） |
+| [`mechanism_viewer_v1/`](mechanism_viewer_v1/) | **机制查看器**（桌面 GUI；可切换 v1 / v2 / v3 角色设定） |
 | [`mechanism_viewer_v2/`](mechanism_viewer_v2/) | 查看器便捷入口，默认选中第 03 篇 Few-shot |
 | [`system_prompt_v2/`](system_prompt_v2/) | **第 03 篇 · system + Few-shot / Zero-shot** |
+| [`role_setting_v3/`](role_setting_v3/) | **第 04 篇 · 多角色 YAML + 指定/自动选取角色** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -30,6 +31,18 @@ python minimal_agent.py
 ```
 
 Zero-shot 对照：`$env:USE_FEW_SHOT="0"` 后重启。机制查看器见 [`mechanism_viewer_v2/README.md`](mechanism_viewer_v2/README.md)。
+
+## 第 04 篇（多角色 + 自动选取角色）
+
+```powershell
+$env:ZHIPU_API_KEY="你的智谱Key"
+$env:AGENT_ROLE="teacher"   # 或 strict_reviewer / auto
+cd role_setting_v3
+pip install -r requirements.txt
+python minimal_agent.py
+```
+
+机制查看器顶栏可选 **第04篇 · 角色设定**（Few-shot / Zero-shot / 自动选取角色）。离线校验：`python scripts/ci_smoke_test.py`。
 
 ## 来源与关注
 

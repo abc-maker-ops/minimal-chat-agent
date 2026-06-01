@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -20,13 +21,43 @@ _LAB_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_LAB_ROOT / "minimal_chat_v1"))
 sys.path.insert(0, str(_LAB_ROOT / "system_prompt_v2"))
 
+
+def _load_lab_module(mod_name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 {path}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_v2_prompt = _load_lab_module(
+    "system_prompt_v2_prompt_session",
+    _LAB_ROOT / "system_prompt_v2" / "prompt_session.py",
+)
+_v3_role_loader = _load_lab_module(
+    "role_setting_v3_role_loader",
+    _LAB_ROOT / "role_setting_v3" / "role_loader.py",
+)
+_v3_prompt = _load_lab_module(
+    "role_setting_v3_prompt_session",
+    _LAB_ROOT / "role_setting_v3" / "prompt_session.py",
+)
+PromptAgentSession = _v2_prompt.PromptAgentSession
+RoleAgentSession = _v3_prompt.RoleAgentSession
+list_role_ids = _v3_role_loader.list_role_ids
+
+_v3_root = str(_LAB_ROOT / "role_setting_v3")
+while _v3_root in sys.path:
+    sys.path.remove(_v3_root)
+
 from agent_session import (  # noqa: E402
     DEFAULT_ZHIPU_BASE_URL,
     AgentSession,
     MechanismSnapshot,
     TurnRecord,
 )
-from prompt_session import PromptAgentSession  # noqa: E402
 
 # —— 界面配色 ——
 C_BG = "#eef2f7"
@@ -75,6 +106,21 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第03篇 · system（Zero-shot）",
         "仅 system，不注入 Few-shot 范例",
     ),
+    AgentVersionSpec(
+        "v3_fewshot",
+        "第04篇 · 角色设定 + Few-shot",
+        "YAML 角色库 + AGENT_ROLE 指定选角",
+    ),
+    AgentVersionSpec(
+        "v3_zeroshot",
+        "第04篇 · 角色设定（Zero-shot）",
+        "YAML 角色库，不注入 Few-shot",
+    ),
+    AgentVersionSpec(
+        "v3_auto",
+        "第04篇 · 角色设定 · 自动选角",
+        "AGENT_ROLE=auto，首条 user 经 role_router 选角",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -87,6 +133,57 @@ class ViewerMeta:
     few_shot: bool | None
     seed_count: int
     keeps_seed_on_reset: bool
+    role_id: str | None = None
+    role_display_name: str | None = None
+    role_version: str | None = None
+    role_source: str | None = None
+    route_reason: str | None = None
+
+
+def _is_v3(version_id: str) -> bool:
+    return version_id.startswith("v3_")
+
+
+def _role_source_short(session: RoleAgentSession) -> str:
+    if session.role_source == "manual":
+        return "指定"
+    if session.role_source == "auto":
+        return "自动"
+    return "待路由"
+
+
+def _role_prompt_preview(session: RoleAgentSession) -> str:
+    if session.messages and session.messages[0].get("role") == "system":
+        return str(session.messages[0]["content"])
+    if session.role is not None:
+        return session.role.compose_system(include_few_shot=session.include_few_shot)
+    return ""
+
+
+def _few_shot_seed_hint(session: RoleAgentSession, meta: ViewerMeta) -> str:
+    if not meta.few_shot:
+        return "未开启（Zero-shot 或未配置 few_shot_ref）"
+    if meta.seed_count <= 1:
+        return "已开启但固定前缀尚无范例对"
+    pairs = max(0, (meta.seed_count - 1) // 2)
+    ref = session.role.few_shot_ref if session.role else None
+    ref_s = f"，来自 {ref}" if ref else ""
+    return f"{pairs} 组 user/assistant 范例{ref_s}"
+
+
+def build_session(version_id: str, *, role_choice: str = "teacher") -> AgentSession | PromptAgentSession | RoleAgentSession:
+    if version_id == "v1_minimal":
+        return AgentSession()
+    if _is_v3(version_id):
+        include_few_shot = version_id != "v3_zeroshot"
+        if version_id == "v3_auto" or role_choice == "auto":
+            return RoleAgentSession(include_few_shot=include_few_shot, force_auto=True)
+        return RoleAgentSession(
+            role_id=role_choice,
+            include_few_shot=include_few_shot,
+        )
+    include_few_shot = version_id == "v2_fewshot"
+    return PromptAgentSession(include_few_shot=include_few_shot)
 
 
 def resolve_default_version(explicit: str | None = None) -> str:
@@ -96,14 +193,9 @@ def resolve_default_version(explicit: str | None = None) -> str:
     return vid
 
 
-def build_session(version_id: str) -> AgentSession | PromptAgentSession:
-    if version_id == "v1_minimal":
-        return AgentSession()
-    include_few_shot = version_id == "v2_fewshot"
-    return PromptAgentSession(include_few_shot=include_few_shot)
-
-
-def make_viewer_meta(version_id: str, session: AgentSession | PromptAgentSession) -> ViewerMeta:
+def make_viewer_meta(
+    version_id: str, session: AgentSession | PromptAgentSession | RoleAgentSession
+) -> ViewerMeta:
     spec = VERSION_BY_ID[version_id]
     if version_id == "v1_minimal":
         return ViewerMeta(
@@ -112,6 +204,21 @@ def make_viewer_meta(version_id: str, session: AgentSession | PromptAgentSession
             few_shot=None,
             seed_count=0,
             keeps_seed_on_reset=False,
+        )
+    if _is_v3(version_id) and isinstance(session, RoleAgentSession):
+        few_shot = version_id != "v3_zeroshot"
+        role = session.role
+        return ViewerMeta(
+            version_id=version_id,
+            version_label=spec.label,
+            few_shot=few_shot,
+            seed_count=session.seed_count,
+            keeps_seed_on_reset=True,
+            role_id=session.role_id,
+            role_display_name=role.display_name if role else None,
+            role_version=role.version if role else None,
+            role_source=_role_source_short(session),
+            route_reason=session.route_reason or None,
         )
     few_shot = version_id == "v2_fewshot"
     return ViewerMeta(
@@ -285,7 +392,24 @@ def startup_message(meta: ViewerMeta) -> str:
     if meta.version_id == "v1_minimal":
         return f"已加载 {meta.version_label}。首轮 messages 为空，见右侧「messages JSON」。"
     fs = "Few-shot 已注入" if meta.few_shot else "Zero-shot（无范例）"
-    return f"已加载 {meta.version_label}；{fs}。种子 {meta.seed_count} 条，见右侧 JSON。"
+    msg = f"已加载 {meta.version_label}；{fs}。"
+    if _is_v3(meta.version_id):
+        if meta.role_id:
+            name = meta.role_display_name or meta.role_id
+            ver = f" v{meta.role_version}" if meta.role_version else ""
+            msg += f" 角色: {name} ({meta.role_id}{ver}) · 选角: {meta.role_source or '—'}"
+            if meta.route_reason:
+                msg += f" · 依据: {meta.route_reason}"
+            msg += "。"
+        else:
+            msg += f" 选角: {meta.role_source or '待路由'}。"
+    if meta.seed_count:
+        msg += f" 种子 {meta.seed_count} 条，见右侧 JSON。"
+    elif _is_v3(meta.version_id):
+        msg += " 发送首条消息后注入固定前缀。"
+    else:
+        msg += " 见右侧 JSON。"
+    return msg
 
 
 class HistoryScopeBar(tk.Frame):
@@ -459,6 +583,160 @@ def _split_message_stats(
     return seed_chars, runtime_chars, seed_pairs
 
 
+class RoleSettingPanel(tk.Frame):
+    """第04篇 v3 专用：当前角色、选角依据、compose_system 预览。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=C_BG)
+        self._value_labels: dict[str, tk.Label] = {}
+
+        info = tk.Frame(
+            self,
+            bg=C_SURFACE,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+            padx=12,
+            pady=10,
+        )
+        info.pack(fill=tk.X, padx=4, pady=(4, 6))
+
+        for label, key in (
+            ("角色 id", "rs_id"),
+            ("展示名", "rs_name"),
+            ("版本", "rs_ver"),
+            ("角色文件", "rs_path"),
+            ("选角来源", "rs_src"),
+            ("选角依据", "rs_reason"),
+            ("Few-shot 种子", "rs_few"),
+        ):
+            row = tk.Frame(info, bg=C_SURFACE)
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(
+                row,
+                text=label,
+                font=("Microsoft YaHei UI", 9),
+                fg=C_MUTED,
+                bg=C_SURFACE,
+                width=12,
+                anchor=tk.W,
+            ).pack(side=tk.LEFT)
+            val = tk.Label(
+                row,
+                text="—",
+                font=("Microsoft YaHei UI", 9),
+                fg=C_TEXT,
+                bg=C_SURFACE,
+                anchor=tk.W,
+                justify=tk.LEFT,
+                wraplength=420,
+            )
+            val.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._value_labels[key] = val
+
+        tk.Label(
+            self,
+            text="角色 Prompt（第一条 role: system 的 content，与发往 API 一致）",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            fg=C_TEXT,
+            bg=C_BG,
+            anchor=tk.W,
+        ).pack(fill=tk.X, padx=8, pady=(4, 2))
+
+        prompt_wrap = tk.Frame(
+            self,
+            bg=C_SURFACE,
+            highlightbackground=C_BORDER,
+            highlightthickness=1,
+        )
+        prompt_wrap.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        self._prompt_text = scrolledtext.ScrolledText(
+            prompt_wrap,
+            wrap=tk.WORD,
+            font=("Microsoft YaHei UI", 9),
+            fg=C_TEXT,
+            bg="#f8fafc",
+            relief=tk.FLAT,
+            padx=8,
+            pady=8,
+        )
+        self._prompt_text.pack(fill=tk.BOTH, expand=True)
+        self._prompt_text.configure(state=tk.DISABLED)
+
+        tk.Label(
+            self,
+            text="提示：非第04篇版本时本页仅作说明；范例对全文见「messages JSON」。",
+            font=("Microsoft YaHei UI", 8),
+            fg=C_MUTED,
+            bg=C_BG,
+            justify=tk.LEFT,
+            wraplength=480,
+        ).pack(fill=tk.X, padx=8, pady=(0, 6))
+
+    def _set(self, key: str, text: str) -> None:
+        lbl = self._value_labels.get(key)
+        if lbl:
+            lbl.configure(text=text)
+
+    def _set_prompt(self, text: str) -> None:
+        self._prompt_text.configure(state=tk.NORMAL)
+        self._prompt_text.delete("1.0", tk.END)
+        self._prompt_text.insert(tk.END, text or "（暂无）")
+        self._prompt_text.configure(state=tk.DISABLED)
+
+    def update_panel(
+        self,
+        meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | None,
+    ) -> None:
+        if not _is_v3(meta.version_id):
+            for key in self._value_labels:
+                self._set(key, "—")
+            self._set_prompt(
+                "请先在窗口顶部选择「第04篇 · 角色设定」任一版本。\n"
+                "本页用于查看当前角色的 system 正文与选角依据。"
+            )
+            return
+
+        if not isinstance(session, RoleAgentSession):
+            for key in self._value_labels:
+                self._set(key, "—")
+            self._set_prompt("（会话未就绪）")
+            return
+
+        if session.role is None or session.role_id is None:
+            self._set("rs_id", "—")
+            self._set("rs_name", "—")
+            self._set("rs_ver", "—")
+            self._set("rs_path", "—")
+            self._set("rs_src", meta.role_source or "待路由")
+            self._set("rs_reason", "—（发送首条 user 后由 role_router 生成）")
+            self._set("rs_few", "—")
+            self._set_prompt(
+                "AGENT_ROLE=auto：固定前缀尚未注入。\n"
+                "请发送首条 user 消息；选角完成后本页将显示 compose_system 结果。"
+            )
+            return
+
+        role = session.role
+        self._set("rs_id", role.id)
+        self._set("rs_name", role.display_name)
+        self._set("rs_ver", role.version)
+        self._set("rs_path", f"prompts/roles/{role.id}.yaml")
+        self._set("rs_src", meta.role_source or _role_source_short(session))
+        reason = meta.route_reason or session.route_reason or ""
+        if meta.role_source == "指定" or session.role_source == "manual":
+            self._set("rs_reason", "—（指定选角，无路由依据）")
+        else:
+            self._set("rs_reason", reason or "—")
+        self._set("rs_few", _few_shot_seed_hint(session, meta))
+
+        preview = _role_prompt_preview(session)
+        if preview:
+            self._set_prompt(preview)
+        else:
+            self._set_prompt("（无法生成预览）")
+
+
 class MechanismDashboard(tk.Frame):
     """右侧机制面板：卡片 + 指标块，替代纯文本。"""
 
@@ -584,6 +862,9 @@ class MechanismDashboard(tk.Frame):
         self._row(ver_body, "当前版本", "ver_label")
         self._row(ver_body, "结构说明", "ver_structure")
         self._row(ver_body, "种子条数", "ver_seed")
+        self._row(ver_body, "当前角色", "ver_role")
+        self._row(ver_body, "选角来源", "ver_role_src")
+        self._row(ver_body, "选角依据", "ver_route_reason")
 
         cfg_body = self._card(p, "运行配置")
         self._row(cfg_body, "模型", "cfg_model")
@@ -669,14 +950,40 @@ class MechanismDashboard(tk.Frame):
             self._set_badge("v1 最小 Agent", C_STAT_ROUNDS, "#ffffff")
             self._set("ver_structure", "无 system / Few-shot")
             self._set("ver_seed", "0（首轮从空列表开始）")
+            self._set("ver_role", "—")
+            self._set("ver_role_src", "—")
+            self._set("ver_route_reason", "—")
         elif meta.few_shot:
-            self._set_badge("Few-shot 开启", C_SUCCESS_BG, C_SUCCESS)
+            badge = "Few-shot 开启" if not _is_v3(meta.version_id) else "v3 · Few-shot"
+            self._set_badge(badge, C_SUCCESS_BG, C_SUCCESS)
             self._set("ver_structure", "system + 范例对已注入")
             self._set("ver_seed", f"{meta.seed_count} 条（清空会话后保留）")
         else:
-            self._set_badge("Zero-shot", C_WARN_BG, C_WARN)
+            badge = "Zero-shot" if not _is_v3(meta.version_id) else "v3 · Zero-shot"
+            self._set_badge(badge, C_WARN_BG, C_WARN)
             self._set("ver_structure", "仅 system，无范例")
             self._set("ver_seed", f"{meta.seed_count} 条（仅 system）")
+
+        if _is_v3(meta.version_id):
+            if meta.role_id:
+                name = meta.role_display_name or meta.role_id
+                ver = f" · v{meta.role_version}" if meta.role_version else ""
+                self._set("ver_role", f"{name} ({meta.role_id}{ver})")
+            else:
+                self._set("ver_role", "（待首句确定）")
+            self._set("ver_role_src", meta.role_source or "—")
+            if meta.route_reason:
+                self._set("ver_route_reason", meta.route_reason)
+            elif meta.role_source == "指定":
+                self._set("ver_route_reason", "—（指定选角无路由依据）")
+            elif meta.role_source == "待路由":
+                self._set("ver_route_reason", "—（首条 user 后生成）")
+            else:
+                self._set("ver_route_reason", "—")
+        elif meta.few_shot is not None:
+            self._set("ver_role", "—")
+            self._set("ver_role_src", "—")
+            self._set("ver_route_reason", "—")
 
         self._set("cfg_model", cfg.model)
         self._set("cfg_url", cfg.base_url)
@@ -765,6 +1072,27 @@ class MechanismViewerApp:
         )
         self.version_combo.pack(side=tk.LEFT)
         self.version_combo.bind("<<ComboboxSelected>>", self._on_version_combo)
+
+        self.role_box = tk.Frame(header, bg=C_HEADER)
+        self.role_box.pack(side=tk.LEFT, padx=(16, 0), pady=8)
+        tk.Label(
+            self.role_box,
+            text="角色",
+            font=("Microsoft YaHei UI", 9),
+            fg="#bfdbfe",
+            bg=C_HEADER,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self.role_var = tk.StringVar(value="teacher")
+        self.role_combo = ttk.Combobox(
+            self.role_box,
+            textvariable=self.role_var,
+            values=self._role_combo_values(),
+            state="readonly",
+            width=18,
+            font=("Microsoft YaHei UI", 9),
+        )
+        self.role_combo.pack(side=tk.LEFT)
+        self.role_combo.bind("<<ComboboxSelected>>", self._on_role_combo)
 
         self.hint_var = tk.StringVar()
         tk.Label(
@@ -897,14 +1225,19 @@ class MechanismViewerApp:
         notebook.pack(fill=tk.BOTH, expand=True)
 
         mech_frame = tk.Frame(notebook, bg=C_BG)
+        role_frame = tk.Frame(notebook, bg=C_BG)
         json_frame = tk.Frame(notebook, bg=C_BG)
         raw_frame = tk.Frame(notebook, bg=C_BG)
         notebook.add(mech_frame, text="  机制面板  ")
+        notebook.add(role_frame, text="  角色设定  ")
         notebook.add(json_frame, text="  messages JSON  ")
         notebook.add(raw_frame, text="  API 原始报文  ")
 
         self.dashboard = MechanismDashboard(mech_frame)
         self.dashboard.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.role_panel = RoleSettingPanel(role_frame)
+        self.role_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         json_wrap = tk.Frame(
             json_frame, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1
@@ -930,6 +1263,49 @@ class MechanismViewerApp:
         self._last_panel_err: str | None = None
         self._load_version(initial_version_id, confirm=False)
 
+    @staticmethod
+    def _role_combo_values() -> list[str]:
+        try:
+            return list_role_ids() + ["auto"]
+        except Exception:
+            return ["teacher", "strict_reviewer", "auto"]
+
+    def _current_role_choice(self) -> str:
+        if self._version_id == "v3_auto":
+            return "auto"
+        if _is_v3(self._version_id):
+            return self.role_var.get().strip() or "teacher"
+        return "teacher"
+
+    def _sync_role_combo_visibility(self) -> None:
+        if _is_v3(self._version_id):
+            self.role_box.pack(side=tk.LEFT, padx=(16, 0), pady=8)
+            if self._version_id == "v3_auto":
+                self.role_var.set("auto")
+                self.role_combo.configure(state=tk.DISABLED)
+            else:
+                self.role_combo.configure(state="readonly")
+                if self.role_var.get() == "auto":
+                    self.role_var.set("teacher")
+        else:
+            self.role_box.pack_forget()
+
+    def _on_role_combo(self, _event: Any = None) -> None:
+        if not _is_v3(self._version_id) or self._version_id == "v3_auto":
+            return
+        if self._busy:
+            messagebox.showwarning("请稍候", "正在请求模型，请完成后再切换角色。")
+            return
+        choice = self.role_var.get().strip()
+        if isinstance(self.session, RoleAgentSession) and self.session.role_id == choice:
+            return
+        if self.session and self.session.round_count > 0:
+            if not messagebox.askyesno("切换角色", "切换角色将清空当轮对话并重建固定前缀。继续？"):
+                if isinstance(self.session, RoleAgentSession) and self.session.role_id:
+                    self.role_var.set(self.session.role_id)
+                return
+        self._load_version(self._version_id, confirm=False, role_choice=choice)
+
     def _on_history_scope_change(self) -> None:
         if self.session is None:
             return
@@ -939,11 +1315,11 @@ class MechanismViewerApp:
         if self._busy:
             messagebox.showwarning("请稍候", "正在请求模型，请稍后再重载。")
             return
-        if self._version_id not in ("v2_fewshot", "v2_zeroshot"):
+        if self._version_id not in ("v2_fewshot", "v2_zeroshot", "v3_fewshot", "v3_zeroshot", "v3_auto"):
             messagebox.showinfo(
                 "重载 Prompt",
                 "当前为第02篇版本，无 prompts 文件。\n"
-                "切换到第03篇后可从 prompts/ 重新读取 system.txt、few_shot.json。",
+                "切换到第03/04篇后可从 prompts/ 重新读取。",
             )
             return
         if self.session and self.session.round_count > 0:
@@ -952,7 +1328,7 @@ class MechanismViewerApp:
                 "将从磁盘重新读取 prompts/ 下文件并清空当轮对话（无需退出程序）。继续？",
             ):
                 return
-        self._load_version(self._version_id, confirm=False)
+        self._load_version(self._version_id, confirm=False, role_choice=self._current_role_choice())
         self.status_var.set("已重载 Prompt 文件（无需重启）")
 
     def _setup_styles(self) -> None:
@@ -987,7 +1363,12 @@ class MechanismViewerApp:
         self.status_var.set(f"已切换至 {VERSION_BY_ID[new_id].label}（无需重启）")
 
     def _load_version(
-        self, version_id: str, *, confirm: bool, preserve_chat: bool = False
+        self,
+        version_id: str,
+        *,
+        confirm: bool,
+        preserve_chat: bool = False,
+        role_choice: str | None = None,
     ) -> None:
         prev_label = (
             VERSION_BY_ID[self._version_id].label
@@ -1000,8 +1381,9 @@ class MechanismViewerApp:
                 return
 
         try:
-            session = build_session(version_id)
-        except RuntimeError as e:
+            choice = role_choice if role_choice is not None else self._current_role_choice()
+            session = build_session(version_id, role_choice=choice)
+        except (RuntimeError, FileNotFoundError, ValueError) as e:
             self.session = None
             self._version_id = version_id
             self.meta = ViewerMeta(
@@ -1017,12 +1399,18 @@ class MechanismViewerApp:
                 self._clear_chat()
             self._set_controls_enabled(False)
             self._set_hint()
+            self._sync_role_combo_visibility()
             self._refresh_panels(None, str(e))
             return
 
         self.session = session
         self._version_id = version_id
         self.meta = make_viewer_meta(version_id, session)
+        self._sync_role_combo_visibility()
+        if isinstance(session, RoleAgentSession) and session.role_id:
+            self.role_var.set(session.role_id)
+        elif version_id == "v3_auto":
+            self.role_var.set("auto")
         self.history_bar.set_scope(SCOPE_CURRENT)
         if preserve_chat and prev_label:
             self._append_version_divider(prev_label)
@@ -1133,14 +1521,17 @@ class MechanismViewerApp:
 
         if err and snap is None:
             self.dashboard.show_error(err)
+            self.role_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(None, err)
             return
         if err:
             self.dashboard.show_error(err)
+            self.role_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(snap, err)
             return
         assert snap is not None
         self.dashboard.update_dashboard(snap, self.meta)
+        self.role_panel.update_panel(self.meta, self.session)
         self._refresh_data_views(snap)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
@@ -1180,6 +1571,23 @@ class MechanismViewerApp:
 
     def _on_chat_ok(self, reply: str, snap: MechanismSnapshot) -> None:
         self._append_chat("assistant", reply)
+        if isinstance(self.session, RoleAgentSession):
+            prev_id = self.meta.role_id
+            self.meta = make_viewer_meta(self._version_id, self.session)
+            if self.session.role_id:
+                self.role_var.set(self.session.role_id)
+            if (
+                self.session.round_count == 1
+                and self.session.role_source == "auto"
+                and self.session.role_id
+                and prev_id is None
+            ):
+                name = self.session.role.display_name if self.session.role else self.session.role_id
+                reason = self.session.route_reason or "—"
+                self._append_chat(
+                    "system",
+                    f"[选角] auto → {self.session.role_id} ({name}) · {reason}",
+                )
         self._refresh_panels(snap)
         self._finish_turn("就绪")
 
@@ -1200,12 +1608,17 @@ class MechanismViewerApp:
         if self.session is None or self._busy:
             return
         if self.meta.keeps_seed_on_reset:
-            msg = "确定清空当轮对话吗？（system 与 Few-shot 种子会保留）"
+            if _is_v3(self._version_id):
+                msg = "确定清空当轮对话吗？（角色固定前缀会按当前选角保留；auto 模式回到待路由）"
+            else:
+                msg = "确定清空当轮对话吗？（system 与 Few-shot 种子会保留）"
         else:
             msg = "确定清空对话与 messages 吗？"
         if not messagebox.askyesno("清空会话", msg):
             return
         snap = self.session.reset()
+        if isinstance(self.session, RoleAgentSession):
+            self.meta = make_viewer_meta(self._version_id, self.session)
         self.history_bar.set_scope(SCOPE_CURRENT)
         self._clear_chat()
         if self.meta.keeps_seed_on_reset:
