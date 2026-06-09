@@ -1,7 +1,7 @@
 # 开源发布：minimal_chat_v1、mechanism_viewer_v1/v2、system_prompt_v2
 
-# 未纳入开源仓库的本地实验目录
-/02_minimal_agent/
+# 本地脚本（不上传 GitHub）
+/scripts/
 
 # Python / 环境
 .env

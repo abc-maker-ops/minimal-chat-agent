@@ -1,14 +1,15 @@
 # mechanism_viewer_v1
 
-**机制查看器（桌面窗口版）** — 系列统一 UI 入口。
+**机制查看器 v1** — 独立窗口，**仅观测 agent v1**（minimal_chat_v1）。
 
-与 `minimal_chat_v1`、`system_prompt_v2` 共用同一程序；**窗口顶部下拉框** 可切换 Agent 版本：
+核心实现：`mechanism_client.py`（各代查看器共用此文件，通过 `profile` 控制可见版本与标签页）。
 
-| 选项 | 说明 |
-|------|------|
-| 第02篇 · minimal_chat_v1 | 仅 user/assistant |
-| 第03篇 · system + Few-shot | system + 3 组范例（默认本篇实验） |
-| 第03篇 · system（Zero-shot） | 仅 system，无范例 |
+| profile | 可见 Agent 版本 | 额外标签页 |
+|---------|-----------------|------------|
+| viewer1（本目录） | 仅 v1_minimal | 无 |
+| viewer2 | v1 + v2 | 无 |
+| viewer3 | v1～v3 | 角色设定 |
+| viewer4 | v1～v4 | 角色设定 + 推理与比选 |
 
 ## 运行
 
@@ -19,18 +20,17 @@ pip install -r requirements.txt
 python mechanism_client.py
 ```
 
-Windows 可双击 **`启动机制查看器.bat`**（默认第 02 篇 v1）。
+Windows 可双击 **`启动机制查看器.bat`**。
 
-环境变量 `MECHANISM_AGENT_VERSION` 可指定启动版本：`v1_minimal`、`v2_fewshot`、`v2_zeroshot`。
+环境变量：`MECHANISM_VIEWER_PROFILE=viewer1`，`MECHANISM_AGENT_VERSION=v1_minimal`。
 
-`mechanism_viewer_v2/`、`system_prompt_v2/mechanism_client.py` 为便捷启动，默认 `v2_fewshot`。
+要看 v2/v3/v4 机制，请启动对应目录的 `mechanism_viewer_v2/`、`mechanism_viewer_v3/`、`mechanism_viewer_v4/`，不要指望在一个窗口里切全系列。
 
-## 标签页
+## 标签页（viewer1）
 
 | 标签页 | 内容 |
 |--------|------|
 | 机制面板 | 版本、模型、轮次、messages 条数、Token |
-| messages JSON | 内存中维护的 `messages` 列表（Agent 视角） |
-| API 原始报文 | 最近一轮 **发送 → LLM** 的请求体与 **LLM → 返回** 的原始 JSON |
+| messages JSON | 内存中维护的 `messages` 列表 |
 
-切换版本会保留聊天区历史，并插入分隔线；右侧机制面板随新版本重置。v2「清空会话」会保留 system / Few-shot 种子。
+viewer1 **不显示**「API 原始报文」标签页（从 viewer2 起才有）。

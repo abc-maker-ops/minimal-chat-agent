@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""从 role_setting_v3 目录启动机制查看器 v3。"""
+"""机制查看器 v3：仅 role_setting_v3（角色设定）。"""
 from __future__ import annotations
 
 import sys

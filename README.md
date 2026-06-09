@@ -42,7 +42,7 @@ pip install -r requirements.txt
 python minimal_agent.py
 ```
 
-机制查看器顶栏可选 **第04篇 · 角色设定**（Few-shot / Zero-shot / 自动选取角色）。离线校验：`python scripts/ci_smoke_test.py`。
+机制查看器顶栏可选 **第04篇 · 角色设定**（Few-shot / Zero-shot / 自动选取角色）。见 [`mechanism_viewer_v3/README.md`](mechanism_viewer_v3/README.md)。
 
 ## 来源与关注
 

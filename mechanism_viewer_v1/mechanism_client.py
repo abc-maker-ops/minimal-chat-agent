@@ -44,8 +44,13 @@ _v3_prompt = _load_lab_module(
     "role_setting_v3_prompt_session",
     _LAB_ROOT / "role_setting_v3" / "prompt_session.py",
 )
+_v4_prompt = _load_lab_module(
+    "role_setting_v4_prompt_session",
+    _LAB_ROOT / "role_setting_v4" / "prompt_session.py",
+)
 PromptAgentSession = _v2_prompt.PromptAgentSession
 RoleAgentSession = _v3_prompt.RoleAgentSession
+CotAgentSession = _v4_prompt.CotAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
 _v3_root = str(_LAB_ROOT / "role_setting_v3")
@@ -121,9 +126,91 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第04篇 · 角色设定 · 自动选角",
         "AGENT_ROLE=auto，首条 user 经 role_router 选角",
     ),
+    AgentVersionSpec(
+        "v4_cot_fewshot",
+        "第05篇 · CoT + Few-shot",
+        "Prompt 层 ## 推理 / ## 结论 + CoT Few-shot",
+    ),
+    AgentVersionSpec(
+        "v4_cot_zeroshot",
+        "第05篇 · CoT（Zero-shot）",
+        "仅 CoT 格式约束，不注入 Few-shot",
+    ),
+    AgentVersionSpec(
+        "v4_tot_fewshot",
+        "第05篇 · 简化 ToT + CoT",
+        "2～3 计划比选后再 CoT 回复",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
+
+# mechanism_viewer_vN 只看 agent v1～vN；观测 Tab 随 N 递增，不可跨代
+VIEWER_PROFILES: dict[str, dict[str, Any]] = {
+    "viewer1": {
+        "title": "机制查看器 v1",
+        "version_ids": ("v1_minimal",),
+        "default_version": "v1_minimal",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_raw_tab": False,
+    },
+    "viewer2": {
+        "title": "机制查看器 v2",
+        "version_ids": ("v1_minimal", "v2_fewshot", "v2_zeroshot"),
+        "default_version": "v2_fewshot",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_raw_tab": True,
+    },
+    "viewer3": {
+        "title": "机制查看器 v3",
+        "version_ids": (
+            "v1_minimal",
+            "v2_fewshot",
+            "v2_zeroshot",
+            "v3_fewshot",
+            "v3_zeroshot",
+            "v3_auto",
+        ),
+        "default_version": "v3_fewshot",
+        "show_role_tab": True,
+        "show_reasoning_tab": False,
+        "show_raw_tab": True,
+    },
+    "viewer4": {
+        "title": "机制查看器 v4",
+        "version_ids": (
+            "v1_minimal",
+            "v2_fewshot",
+            "v2_zeroshot",
+            "v3_fewshot",
+            "v3_zeroshot",
+            "v3_auto",
+            "v4_cot_fewshot",
+            "v4_cot_zeroshot",
+            "v4_tot_fewshot",
+        ),
+        "default_version": "v4_cot_fewshot",
+        "show_role_tab": True,
+        "show_reasoning_tab": True,
+        "show_raw_tab": True,
+    },
+}
+
+
+def resolve_viewer_profile(name: str | None) -> str:
+    key = (name or os.getenv("MECHANISM_VIEWER_PROFILE") or "viewer1").strip()
+    if key == "article4":
+        return "viewer3"
+    if key not in VIEWER_PROFILES:
+        return "viewer1"
+    return key
+
+
+def versions_for_profile(profile: str) -> tuple[AgentVersionSpec, ...]:
+    allowed = set(VIEWER_PROFILES[profile]["version_ids"])
+    return tuple(v for v in AGENT_VERSIONS if v.id in allowed)
 
 
 @dataclass
@@ -140,11 +227,23 @@ class ViewerMeta:
     route_reason: str | None = None
 
 
+    tot_enabled: bool = False
+    include_cot: bool = True
+
+
 def _is_v3(version_id: str) -> bool:
     return version_id.startswith("v3_")
 
 
-def _role_source_short(session: RoleAgentSession) -> str:
+def _is_v4(version_id: str) -> bool:
+    return version_id.startswith("v4_")
+
+
+def _is_role_agent(version_id: str) -> bool:
+    return _is_v3(version_id) or _is_v4(version_id)
+
+
+def _role_source_short(session: RoleAgentSession | CotAgentSession) -> str:
     if session.role_source == "manual":
         return "指定"
     if session.role_source == "auto":
@@ -152,28 +251,49 @@ def _role_source_short(session: RoleAgentSession) -> str:
     return "待路由"
 
 
-def _role_prompt_preview(session: RoleAgentSession) -> str:
+def _role_prompt_preview(session: RoleAgentSession | CotAgentSession) -> str:
     if session.messages and session.messages[0].get("role") == "system":
         return str(session.messages[0]["content"])
     if session.role is not None:
-        return session.role.compose_system(include_few_shot=session.include_few_shot)
+        kwargs: dict[str, bool] = {"include_few_shot": session.include_few_shot}
+        if hasattr(session, "include_cot"):
+            kwargs["include_cot"] = bool(session.include_cot)
+        return session.role.compose_system(**kwargs)
     return ""
 
 
-def _few_shot_seed_hint(session: RoleAgentSession, meta: ViewerMeta) -> str:
+def _few_shot_seed_hint(
+    session: RoleAgentSession | CotAgentSession, meta: ViewerMeta
+) -> str:
     if not meta.few_shot:
         return "未开启（Zero-shot 或未配置 few_shot_ref）"
     if meta.seed_count <= 1:
         return "已开启但固定前缀尚无范例对"
     pairs = max(0, (meta.seed_count - 1) // 2)
-    ref = session.role.few_shot_ref if session.role else None
+    ref = None
+    if session.role:
+        if meta.include_cot and getattr(session.role, "cot_few_shot_ref", None):
+            ref = session.role.cot_few_shot_ref
+        else:
+            ref = session.role.few_shot_ref
     ref_s = f"，来自 {ref}" if ref else ""
     return f"{pairs} 组 user/assistant 范例{ref_s}"
 
 
-def build_session(version_id: str, *, role_choice: str = "teacher") -> AgentSession | PromptAgentSession | RoleAgentSession:
+def build_session(
+    version_id: str, *, role_choice: str = "teacher"
+) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v4(version_id):
+        include_few_shot = version_id != "v4_cot_zeroshot"
+        tot_enabled = version_id == "v4_tot_fewshot"
+        return CotAgentSession(
+            role_id=role_choice,
+            include_few_shot=include_few_shot,
+            include_cot=True,
+            tot_enabled=tot_enabled,
+        )
     if _is_v3(version_id):
         include_few_shot = version_id != "v3_zeroshot"
         if version_id == "v3_auto" or role_choice == "auto":
@@ -186,15 +306,21 @@ def build_session(version_id: str, *, role_choice: str = "teacher") -> AgentSess
     return PromptAgentSession(include_few_shot=include_few_shot)
 
 
-def resolve_default_version(explicit: str | None = None) -> str:
-    vid = (explicit or os.getenv("MECHANISM_AGENT_VERSION") or "v1_minimal").strip()
-    if vid not in VERSION_BY_ID:
-        return "v1_minimal"
+def resolve_default_version(
+    explicit: str | None = None, *, profile: str = "viewer1"
+) -> str:
+    cfg = VIEWER_PROFILES.get(profile, VIEWER_PROFILES["viewer1"])
+    fallback = str(cfg["default_version"])
+    vid = (explicit or os.getenv("MECHANISM_AGENT_VERSION") or fallback).strip()
+    allowed = set(cfg["version_ids"])
+    if vid not in VERSION_BY_ID or vid not in allowed:
+        return fallback
     return vid
 
 
 def make_viewer_meta(
-    version_id: str, session: AgentSession | PromptAgentSession | RoleAgentSession
+    version_id: str,
+    session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession,
 ) -> ViewerMeta:
     spec = VERSION_BY_ID[version_id]
     if version_id == "v1_minimal":
@@ -204,6 +330,23 @@ def make_viewer_meta(
             few_shot=None,
             seed_count=0,
             keeps_seed_on_reset=False,
+        )
+    if _is_v4(version_id) and isinstance(session, CotAgentSession):
+        few_shot = version_id != "v4_cot_zeroshot"
+        role = session.role
+        return ViewerMeta(
+            version_id=version_id,
+            version_label=spec.label,
+            few_shot=few_shot,
+            seed_count=session.seed_count,
+            keeps_seed_on_reset=True,
+            role_id=session.role_id,
+            role_display_name=role.display_name if role else None,
+            role_version=role.version if role else None,
+            role_source=_role_source_short(session),
+            route_reason=session.route_reason or None,
+            tot_enabled=session.tot_enabled,
+            include_cot=session.include_cot,
         )
     if _is_v3(version_id) and isinstance(session, RoleAgentSession):
         few_shot = version_id != "v3_zeroshot"
@@ -393,7 +536,7 @@ def startup_message(meta: ViewerMeta) -> str:
         return f"已加载 {meta.version_label}。首轮 messages 为空，见右侧「messages JSON」。"
     fs = "Few-shot 已注入" if meta.few_shot else "Zero-shot（无范例）"
     msg = f"已加载 {meta.version_label}；{fs}。"
-    if _is_v3(meta.version_id):
+    if _is_v3(meta.version_id) or _is_v4(meta.version_id):
         if meta.role_id:
             name = meta.role_display_name or meta.role_id
             ver = f" v{meta.role_version}" if meta.role_version else ""
@@ -403,9 +546,12 @@ def startup_message(meta: ViewerMeta) -> str:
             msg += "。"
         else:
             msg += f" 选角: {meta.role_source or '待路由'}。"
+        if _is_v4(meta.version_id):
+            mode = "简化 ToT + CoT" if meta.tot_enabled else "CoT"
+            msg += f" 推理: {mode}。"
     if meta.seed_count:
         msg += f" 种子 {meta.seed_count} 条，见右侧 JSON。"
-    elif _is_v3(meta.version_id):
+    elif _is_v3(meta.version_id) or _is_v4(meta.version_id):
         msg += " 发送首条消息后注入固定前缀。"
     else:
         msg += " 见右侧 JSON。"
@@ -688,16 +834,13 @@ class RoleSettingPanel(tk.Frame):
         meta: ViewerMeta,
         session: AgentSession | PromptAgentSession | RoleAgentSession | None,
     ) -> None:
-        if not _is_v3(meta.version_id):
+        if not _is_role_agent(meta.version_id):
             for key in self._value_labels:
                 self._set(key, "—")
-            self._set_prompt(
-                "请先在窗口顶部选择「第04篇 · 角色设定」任一版本。\n"
-                "本页用于查看当前角色的 system 正文与选角依据。"
-            )
+            self._set_prompt("当前 Agent 版本无角色设定（请切换到 v3/v4 条目）。")
             return
 
-        if not isinstance(session, RoleAgentSession):
+        if not isinstance(session, (RoleAgentSession, CotAgentSession)):
             for key in self._value_labels:
                 self._set(key, "—")
             self._set_prompt("（会话未就绪）")
@@ -721,20 +864,109 @@ class RoleSettingPanel(tk.Frame):
         self._set("rs_id", role.id)
         self._set("rs_name", role.display_name)
         self._set("rs_ver", role.version)
-        self._set("rs_path", f"prompts/roles/{role.id}.yaml")
+        self._set("rs_path", f"role_setting_v3/prompts/roles/{role.id}.yaml")
         self._set("rs_src", meta.role_source or _role_source_short(session))
         reason = meta.route_reason or session.route_reason or ""
         if meta.role_source == "指定" or session.role_source == "manual":
             self._set("rs_reason", "—（指定选角，无路由依据）")
         else:
             self._set("rs_reason", reason or "—")
-        self._set("rs_few", _few_shot_seed_hint(session, meta))
+        few_hint = _few_shot_seed_hint(session, meta)
+        if _is_v4(meta.version_id) and meta.include_cot:
+            few_hint += "；含 CoT 格式约束"
+        self._set("rs_few", few_hint)
 
         preview = _role_prompt_preview(session)
         if preview:
             self._set_prompt(preview)
         else:
             self._set_prompt("（无法生成预览）")
+
+
+class ReasoningPanel(tk.Frame):
+    """v4 agent：CoT 分段与简化 ToT 观测。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=C_BG)
+        self._value_labels: dict[str, tk.Label] = {}
+        info = tk.Frame(
+            self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1,
+            padx=12, pady=10,
+        )
+        info.pack(fill=tk.X, padx=4, pady=(4, 6))
+        for label, key in (
+            ("CoT 格式", "rn_cot"),
+            ("ToT 候选数", "rn_n"),
+            ("选中计划", "rn_sel"),
+            ("比选依据", "rn_reason"),
+        ):
+            row = tk.Frame(info, bg=C_SURFACE)
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, font=("Microsoft YaHei UI", 9), fg=C_MUTED,
+                     bg=C_SURFACE, width=12, anchor=tk.W).pack(side=tk.LEFT)
+            val = tk.Label(row, text="—", font=("Microsoft YaHei UI", 9), fg=C_TEXT,
+                           bg=C_SURFACE, anchor=tk.W, wraplength=420, justify=tk.LEFT)
+            val.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._value_labels[key] = val
+        for title, attr in (("## 推理", "_r"), ("## 结论", "_c"), ("ToT 计划", "_p")):
+            tk.Label(self, text=title, font=("Microsoft YaHei UI", 9, "bold"),
+                     fg=C_TEXT, bg=C_BG, anchor=tk.W).pack(fill=tk.X, padx=8, pady=(4, 2))
+            wrap = tk.Frame(self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1)
+            wrap.pack(fill=tk.BOTH, expand=(attr == "_r"), padx=4, pady=(0, 4))
+            box = scrolledtext.ScrolledText(wrap, wrap=tk.WORD, height=5 if attr != "_r" else 7,
+                font=("Microsoft YaHei UI", 9), fg=C_TEXT, bg="#f8fafc", relief=tk.FLAT, padx=8, pady=8)
+            box.pack(fill=tk.BOTH, expand=True)
+            box.configure(state=tk.DISABLED)
+            setattr(self, attr, box)
+
+    def _set(self, key: str, text: str, *, fg: str | None = None) -> None:
+        lbl = self._value_labels.get(key)
+        if lbl:
+            lbl.configure(text=text)
+            if fg:
+                lbl.configure(fg=fg)
+
+    def _fill(self, w: scrolledtext.ScrolledText, text: str) -> None:
+        w.configure(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert(tk.END, text or "（暂无）")
+        w.configure(state=tk.DISABLED)
+
+    def update_panel(
+        self, meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
+    ) -> None:
+        if not _is_v4(meta.version_id) or not isinstance(session, CotAgentSession):
+            for k in self._value_labels:
+                self._set(k, "—")
+            self._fill(self._r, "请切换到 v4 Agent 版本。")
+            self._fill(self._c, "")
+            self._fill(self._p, "")
+            return
+        if session.last_cot and session.cot_format_ok():
+            self._set("rn_cot", "合规", fg=C_SUCCESS)
+        elif session.last_cot:
+            self._set("rn_cot", "未合规", fg=C_ERROR)
+        else:
+            self._set("rn_cot", "—")
+        if session.last_plans:
+            self._set("rn_n", str(len(session.last_plans)))
+            self._set("rn_sel", (session.selected_plan or "—")[:120])
+            self._set("rn_reason", session.plan_select_reason or "—")
+            lines = [f"{i}. {p}{' ← 选中' if p == session.selected_plan else ''}"
+                     for i, p in enumerate(session.last_plans, 1)]
+            self._fill(self._p, "\n\n".join(lines))
+        else:
+            self._set("rn_n", "—")
+            self._set("rn_sel", "—")
+            self._set("rn_reason", "—")
+            self._fill(self._p, "—")
+        if session.last_cot:
+            self._fill(self._r, session.last_cot.reasoning)
+            self._fill(self._c, session.last_cot.conclusion)
+        else:
+            self._fill(self._r, "—")
+            self._fill(self._c, "—")
 
 
 class MechanismDashboard(tk.Frame):
@@ -954,17 +1186,33 @@ class MechanismDashboard(tk.Frame):
             self._set("ver_role_src", "—")
             self._set("ver_route_reason", "—")
         elif meta.few_shot:
-            badge = "Few-shot 开启" if not _is_v3(meta.version_id) else "v3 · Few-shot"
+            if _is_v4(meta.version_id):
+                badge = "v4 · ToT + CoT" if meta.tot_enabled else "v4 · CoT + Few-shot"
+            elif _is_v3(meta.version_id):
+                badge = "v3 · Few-shot"
+            else:
+                badge = "Few-shot 开启"
             self._set_badge(badge, C_SUCCESS_BG, C_SUCCESS)
-            self._set("ver_structure", "system + 范例对已注入")
+            base = "system + 范例对已注入"
+            if _is_v4(meta.version_id):
+                base += " + CoT 格式" + (" + ToT 比选" if meta.tot_enabled else "")
+            self._set("ver_structure", base)
             self._set("ver_seed", f"{meta.seed_count} 条（清空会话后保留）")
         else:
-            badge = "Zero-shot" if not _is_v3(meta.version_id) else "v3 · Zero-shot"
+            if _is_v4(meta.version_id):
+                badge = "v4 · CoT Zero-shot"
+            elif _is_v3(meta.version_id):
+                badge = "v3 · Zero-shot"
+            else:
+                badge = "Zero-shot"
             self._set_badge(badge, C_WARN_BG, C_WARN)
-            self._set("ver_structure", "仅 system，无范例")
+            base = "仅 system，无范例"
+            if _is_v4(meta.version_id):
+                base += " + CoT 格式" + (" + ToT 比选" if meta.tot_enabled else "")
+            self._set("ver_structure", base)
             self._set("ver_seed", f"{meta.seed_count} 条（仅 system）")
 
-        if _is_v3(meta.version_id):
+        if _is_v3(meta.version_id) or _is_v4(meta.version_id):
             if meta.role_id:
                 name = meta.role_display_name or meta.role_id
                 ver = f" · v{meta.role_version}" if meta.role_version else ""
@@ -1019,8 +1267,13 @@ class MechanismDashboard(tk.Frame):
 
 
 class MechanismViewerApp:
-    def __init__(self, root: tk.Tk, initial_version_id: str) -> None:
+    def __init__(
+        self, root: tk.Tk, initial_version_id: str, *, profile: str = "viewer1"
+    ) -> None:
         self.root = root
+        self._profile = resolve_viewer_profile(profile)
+        self._profile_cfg = VIEWER_PROFILES[self._profile]
+        self._version_specs = versions_for_profile(self._profile)
         self._busy = False
         self._version_id = initial_version_id
         self.session: AgentSession | PromptAgentSession | None = None
@@ -1032,7 +1285,7 @@ class MechanismViewerApp:
             keeps_seed_on_reset=initial_version_id != "v1_minimal",
         )
 
-        root.title("Agent 机制查看器")
+        root.title(str(self._profile_cfg["title"]))
         root.configure(bg=C_BG)
         root.minsize(960, 640)
         root.geometry("1120x700")
@@ -1065,16 +1318,17 @@ class MechanismViewerApp:
         self.version_combo = ttk.Combobox(
             ver_box,
             textvariable=self.version_var,
-            values=[v.label for v in AGENT_VERSIONS],
+            values=[v.label for v in self._version_specs],
             state="readonly",
             width=32,
             font=("Microsoft YaHei UI", 9),
         )
         self.version_combo.pack(side=tk.LEFT)
         self.version_combo.bind("<<ComboboxSelected>>", self._on_version_combo)
+        if len(self._version_specs) <= 1:
+            ver_box.pack_forget()
 
         self.role_box = tk.Frame(header, bg=C_HEADER)
-        self.role_box.pack(side=tk.LEFT, padx=(16, 0), pady=8)
         tk.Label(
             self.role_box,
             text="角色",
@@ -1226,18 +1480,30 @@ class MechanismViewerApp:
 
         mech_frame = tk.Frame(notebook, bg=C_BG)
         role_frame = tk.Frame(notebook, bg=C_BG)
+        reasoning_frame = tk.Frame(notebook, bg=C_BG)
         json_frame = tk.Frame(notebook, bg=C_BG)
         raw_frame = tk.Frame(notebook, bg=C_BG)
         notebook.add(mech_frame, text="  机制面板  ")
-        notebook.add(role_frame, text="  角色设定  ")
+        if self._profile_cfg["show_role_tab"]:
+            notebook.add(role_frame, text="  角色设定  ")
+        if self._profile_cfg["show_reasoning_tab"]:
+            notebook.add(reasoning_frame, text="  推理与比选  ")
         notebook.add(json_frame, text="  messages JSON  ")
-        notebook.add(raw_frame, text="  API 原始报文  ")
+        if self._profile_cfg["show_raw_tab"]:
+            notebook.add(raw_frame, text="  API 原始报文  ")
 
         self.dashboard = MechanismDashboard(mech_frame)
         self.dashboard.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self.role_panel = RoleSettingPanel(role_frame)
-        self.role_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.role_panel: RoleSettingPanel | None = None
+        if self._profile_cfg["show_role_tab"]:
+            self.role_panel = RoleSettingPanel(role_frame)
+            self.role_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.reasoning_panel: ReasoningPanel | None = None
+        if self._profile_cfg["show_reasoning_tab"]:
+            self.reasoning_panel = ReasoningPanel(reasoning_frame)
+            self.reasoning_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         json_wrap = tk.Frame(
             json_frame, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1
@@ -1257,8 +1523,10 @@ class MechanismViewerApp:
         )
         self.json_text.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        self.raw_panel = RawApiPanel(raw_frame)
-        self.raw_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self.raw_panel: RawApiPanel | None = None
+        if self._profile_cfg["show_raw_tab"]:
+            self.raw_panel = RawApiPanel(raw_frame)
+            self.raw_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         self._last_panel_err: str | None = None
         self._load_version(initial_version_id, confirm=False)
@@ -1273,35 +1541,35 @@ class MechanismViewerApp:
     def _current_role_choice(self) -> str:
         if self._version_id == "v3_auto":
             return "auto"
-        if _is_v3(self._version_id):
+        if _is_role_agent(self._version_id):
             return self.role_var.get().strip() or "teacher"
         return "teacher"
 
     def _sync_role_combo_visibility(self) -> None:
-        if _is_v3(self._version_id):
-            self.role_box.pack(side=tk.LEFT, padx=(16, 0), pady=8)
-            if self._version_id == "v3_auto":
-                self.role_var.set("auto")
-                self.role_combo.configure(state=tk.DISABLED)
-            else:
-                self.role_combo.configure(state="readonly")
-                if self.role_var.get() == "auto":
-                    self.role_var.set("teacher")
-        else:
+        if not self._profile_cfg["show_role_tab"] or not _is_role_agent(self._version_id):
             self.role_box.pack_forget()
+            return
+        self.role_box.pack(side=tk.LEFT, padx=(16, 0), pady=8)
+        if self._version_id == "v3_auto":
+            self.role_var.set("auto")
+            self.role_combo.configure(state=tk.DISABLED)
+        else:
+            self.role_combo.configure(state="readonly")
+            if self.role_var.get() == "auto":
+                self.role_var.set("teacher")
 
     def _on_role_combo(self, _event: Any = None) -> None:
-        if not _is_v3(self._version_id) or self._version_id == "v3_auto":
+        if not _is_role_agent(self._version_id) or self._version_id == "v3_auto":
             return
         if self._busy:
             messagebox.showwarning("请稍候", "正在请求模型，请完成后再切换角色。")
             return
         choice = self.role_var.get().strip()
-        if isinstance(self.session, RoleAgentSession) and self.session.role_id == choice:
+        if isinstance(self.session, (RoleAgentSession, CotAgentSession)) and self.session.role_id == choice:
             return
         if self.session and self.session.round_count > 0:
             if not messagebox.askyesno("切换角色", "切换角色将清空当轮对话并重建固定前缀。继续？"):
-                if isinstance(self.session, RoleAgentSession) and self.session.role_id:
+                if isinstance(self.session, (RoleAgentSession, CotAgentSession)) and self.session.role_id:
                     self.role_var.set(self.session.role_id)
                 return
         self._load_version(self._version_id, confirm=False, role_choice=choice)
@@ -1315,12 +1583,8 @@ class MechanismViewerApp:
         if self._busy:
             messagebox.showwarning("请稍候", "正在请求模型，请稍后再重载。")
             return
-        if self._version_id not in ("v2_fewshot", "v2_zeroshot", "v3_fewshot", "v3_zeroshot", "v3_auto"):
-            messagebox.showinfo(
-                "重载 Prompt",
-                "当前为第02篇版本，无 prompts 文件。\n"
-                "切换到第03/04篇后可从 prompts/ 重新读取。",
-            )
+        if self._version_id not in tuple(self._profile_cfg["version_ids"]) or self._version_id == "v1_minimal":
+            messagebox.showinfo("重载 Prompt", "当前 Agent 版本无可重载的 prompts。")
             return
         if self.session and self.session.round_count > 0:
             if not messagebox.askyesno(
@@ -1407,7 +1671,7 @@ class MechanismViewerApp:
         self._version_id = version_id
         self.meta = make_viewer_meta(version_id, session)
         self._sync_role_combo_visibility()
-        if isinstance(session, RoleAgentSession) and session.role_id:
+        if isinstance(session, (RoleAgentSession, CotAgentSession)) and session.role_id:
             self.role_var.set(session.role_id)
         elif version_id == "v3_auto":
             self.role_var.set("auto")
@@ -1509,10 +1773,12 @@ class MechanismViewerApp:
         scope = self.history_bar.get_scope()
         if snap is None and self.session is None:
             self._set_json("[]")
-            self.raw_panel.show_empty(err)
+            if self.raw_panel:
+                self.raw_panel.show_empty(err)
             return
         self._set_json(format_messages_for_scope(self.session, snap, scope))
-        self.raw_panel.update_scope(self.session, snap, scope, err)
+        if self.raw_panel:
+            self.raw_panel.update_scope(self.session, snap, scope, err)
 
     def _refresh_panels(self, snap: MechanismSnapshot | None, err: str | None = None) -> None:
         self._last_panel_err = err
@@ -1521,17 +1787,26 @@ class MechanismViewerApp:
 
         if err and snap is None:
             self.dashboard.show_error(err)
-            self.role_panel.update_panel(self.meta, self.session)
+            if self.role_panel:
+                self.role_panel.update_panel(self.meta, self.session)
+            if self.reasoning_panel:
+                self.reasoning_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(None, err)
             return
         if err:
             self.dashboard.show_error(err)
-            self.role_panel.update_panel(self.meta, self.session)
+            if self.role_panel:
+                self.role_panel.update_panel(self.meta, self.session)
+            if self.reasoning_panel:
+                self.reasoning_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(snap, err)
             return
         assert snap is not None
         self.dashboard.update_dashboard(snap, self.meta)
-        self.role_panel.update_panel(self.meta, self.session)
+        if self.role_panel:
+            self.role_panel.update_panel(self.meta, self.session)
+        if self.reasoning_panel:
+            self.reasoning_panel.update_panel(self.meta, self.session)
         self._refresh_data_views(snap)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
@@ -1571,7 +1846,7 @@ class MechanismViewerApp:
 
     def _on_chat_ok(self, reply: str, snap: MechanismSnapshot) -> None:
         self._append_chat("assistant", reply)
-        if isinstance(self.session, RoleAgentSession):
+        if isinstance(self.session, (RoleAgentSession, CotAgentSession)):
             prev_id = self.meta.role_id
             self.meta = make_viewer_meta(self._version_id, self.session)
             if self.session.role_id:
@@ -1588,6 +1863,22 @@ class MechanismViewerApp:
                     "system",
                     f"[选角] auto → {self.session.role_id} ({name}) · {reason}",
                 )
+            if isinstance(self.session, CotAgentSession) and self.session.last_cot:
+                r = self.session.last_cot.reasoning.strip()
+                c = self.session.last_cot.conclusion.strip()
+                if r or c:
+                    self._append_chat(
+                        "system",
+                        f"[CoT] 推理段 {len(r)} 字 · 结论段 {len(c)} 字",
+                    )
+            if (
+                isinstance(self.session, CotAgentSession)
+                and self.session.tot_enabled
+                and self.session.last_plans
+            ):
+                n = len(self.session.last_plans)
+                sel = self.session.selected_plan or "—"
+                self._append_chat("system", f"[ToT] 生成 {n} 个计划，选中: {sel}")
         self._refresh_panels(snap)
         self._finish_turn("就绪")
 
@@ -1608,7 +1899,7 @@ class MechanismViewerApp:
         if self.session is None or self._busy:
             return
         if self.meta.keeps_seed_on_reset:
-            if _is_v3(self._version_id):
+            if _is_role_agent(self._version_id):
                 msg = "确定清空当轮对话吗？（角色固定前缀会按当前选角保留；auto 模式回到待路由）"
             else:
                 msg = "确定清空当轮对话吗？（system 与 Few-shot 种子会保留）"
@@ -1617,7 +1908,7 @@ class MechanismViewerApp:
         if not messagebox.askyesno("清空会话", msg):
             return
         snap = self.session.reset()
-        if isinstance(self.session, RoleAgentSession):
+        if isinstance(self.session, (RoleAgentSession, CotAgentSession)):
             self.meta = make_viewer_meta(self._version_id, self.session)
         self.history_bar.set_scope(SCOPE_CURRENT)
         self._clear_chat()
@@ -1628,11 +1919,14 @@ class MechanismViewerApp:
         self._refresh_panels(snap)
 
 
-def main(default_version: str | None = None) -> None:
-    initial = resolve_default_version(default_version)
+def main(
+    default_version: str | None = None, *, profile: str | None = None
+) -> None:
+    prof = resolve_viewer_profile(profile)
+    initial = resolve_default_version(default_version, profile=prof)
 
     root = tk.Tk()
-    MechanismViewerApp(root, initial)
+    MechanismViewerApp(root, initial, profile=prof)
     root.mainloop()
 
 

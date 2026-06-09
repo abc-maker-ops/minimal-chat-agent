@@ -10,6 +10,12 @@ import yaml
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 ROLES_DIR = PROMPT_DIR / "roles"
 
+_COT_SUFFIX = (
+    "\n\n输出格式（Prompt 层 CoT）：\n"
+    "1. 每次回复必须包含且仅包含两段，使用二级标题「## 推理」与「## 结论」，顺序固定，中间空一行。\n"
+    "2. 「## 推理」写分步依据；「## 结论」写面向用户的最终答案。"
+)
+
 
 @dataclass(frozen=True)
 class RoleSpec:
@@ -19,22 +25,32 @@ class RoleSpec:
     system_body: str
     rules: tuple[str, ...]
     few_shot_ref: str | None
+    cot_few_shot_ref: str | None
     routing_hint: str
     keywords: tuple[str, ...]
 
-    def compose_system(self, *, include_few_shot: bool = True) -> str:
+    def compose_system(
+        self, *, include_few_shot: bool = True, include_cot: bool = False
+    ) -> str:
         parts = [self.system_body.strip()]
         if self.rules:
             parts.append("")
             parts.append("规则：")
             for i, rule in enumerate(self.rules, start=1):
                 parts.append(f"{i}. {rule.strip()}")
-        if include_few_shot and self.few_shot_ref:
+        if include_cot:
+            parts.append(_COT_SUFFIX)
+        if include_few_shot and (self.few_shot_ref or self.cot_few_shot_ref):
             parts.append("")
-            parts.append(
-                "情绪分类等结构化任务：严格模仿 Few-shot 范例，"
-                "只输出一行 JSON，不要前后说明，不要用 Markdown 代码块包裹。"
-            )
+            if include_cot and self.cot_few_shot_ref:
+                parts.append(
+                    "Few-shot 范例已展示「## 推理 / ## 结论」分段格式，请严格对齐。"
+                )
+            elif self.few_shot_ref:
+                parts.append(
+                    "情绪分类等结构化任务：严格模仿 Few-shot 范例，"
+                    "只输出一行 JSON，不要前后说明，不要用 Markdown 代码块包裹。"
+                )
         return "\n".join(parts).strip()
 
 
@@ -51,6 +67,9 @@ def _parse_role(data: dict, path: Path) -> RoleSpec:
     few_shot_ref = data.get("few_shot_ref")
     if few_shot_ref is not None:
         few_shot_ref = str(few_shot_ref).strip() or None
+    cot_few_shot_ref = data.get("cot_few_shot_ref")
+    if cot_few_shot_ref is not None:
+        cot_few_shot_ref = str(cot_few_shot_ref).strip() or None
     return RoleSpec(
         id=str(data["id"]).strip(),
         display_name=str(data["display_name"]).strip(),
@@ -58,6 +77,7 @@ def _parse_role(data: dict, path: Path) -> RoleSpec:
         system_body=str(data["system_body"]).strip(),
         rules=tuple(str(r).strip() for r in rules_raw if str(r).strip()),
         few_shot_ref=few_shot_ref,
+        cot_few_shot_ref=cot_few_shot_ref,
         routing_hint=str(data.get("routing_hint") or "").strip(),
         keywords=tuple(str(k).strip().lower() for k in keywords_raw if str(k).strip()),
     )
@@ -81,10 +101,11 @@ def load_role(role_id: str) -> RoleSpec:
     role = _parse_role(data, path)
     if role.id != role_id:
         raise ValueError(f"文件名 {role_id} 与 id 字段 {role.id!r} 不一致: {path}")
-    if role.few_shot_ref:
-        ref = PROMPT_DIR / role.few_shot_ref
-        if not ref.exists():
-            raise FileNotFoundError(f"角色 {role_id} 引用的 few_shot 不存在: {ref}")
+    for ref_name in (role.few_shot_ref, role.cot_few_shot_ref):
+        if ref_name:
+            ref = PROMPT_DIR / ref_name
+            if not ref.exists():
+                raise FileNotFoundError(f"角色 {role_id} 引用的 few_shot 不存在: {ref}")
     return role
 
 

@@ -29,9 +29,20 @@ def load_few_shot_messages(ref: str) -> list[dict]:
     return messages
 
 
-def build_seed_messages(role: RoleSpec, *, include_few_shot: bool = True) -> list[dict]:
-    system_content = role.compose_system(include_few_shot=include_few_shot)
+def _few_shot_ref_for(role: RoleSpec, *, include_cot: bool) -> str | None:
+    if include_cot and role.cot_few_shot_ref:
+        return role.cot_few_shot_ref
+    return role.few_shot_ref
+
+
+def build_seed_messages(
+    role: RoleSpec, *, include_few_shot: bool = True, include_cot: bool = False
+) -> list[dict]:
+    system_content = role.compose_system(
+        include_few_shot=include_few_shot, include_cot=include_cot
+    )
     messages: list[dict] = [{"role": "system", "content": system_content}]
-    if include_few_shot and role.few_shot_ref:
-        messages.extend(load_few_shot_messages(role.few_shot_ref))
+    ref = _few_shot_ref_for(role, include_cot=include_cot)
+    if include_few_shot and ref:
+        messages.extend(load_few_shot_messages(ref))
     return messages

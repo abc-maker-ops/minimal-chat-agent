@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""从 system_prompt_v2 目录启动统一机制查看器（默认 Few-shot）。"""
+"""从 system_prompt_v2 目录启动机制查看器 v2。"""
 from __future__ import annotations
 
 import sys
@@ -11,4 +11,4 @@ sys.path.insert(0, str(_V1_DIR))
 import mechanism_client as _viewer  # noqa: E402
 
 if __name__ == "__main__":
-    _viewer.main(default_version="v2_fewshot")
+    _viewer.main(default_version="v2_fewshot", profile="viewer2")

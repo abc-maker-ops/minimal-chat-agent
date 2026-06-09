@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""从 role_setting_v3 目录启动机制查看器 v3。"""
+"""从 role_setting_v4 目录启动机制查看器 v4。"""
 from __future__ import annotations
 
 import sys
@@ -11,4 +11,4 @@ sys.path.insert(0, str(_V1_DIR))
 import mechanism_client as _viewer  # noqa: E402
 
 if __name__ == "__main__":
-    _viewer.main(default_version="v3_fewshot", profile="viewer3")
+    _viewer.main(default_version="v4_cot_fewshot", profile="viewer4")
