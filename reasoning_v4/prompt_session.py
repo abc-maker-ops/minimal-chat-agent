@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""role_setting_v4：在 role_setting_v3 上叠加 Prompt 层 CoT 与可选简化 ToT。"""
+"""reasoning_v4：在 role_setting_v3 上叠加 Prompt 层 CoT 与可选简化 ToT。"""
 from __future__ import annotations
 
 import importlib.util

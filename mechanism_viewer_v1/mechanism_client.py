@@ -45,8 +45,8 @@ _v3_prompt = _load_lab_module(
     _LAB_ROOT / "role_setting_v3" / "prompt_session.py",
 )
 _v4_prompt = _load_lab_module(
-    "role_setting_v4_prompt_session",
-    _LAB_ROOT / "role_setting_v4" / "prompt_session.py",
+    "reasoning_v4_prompt_session",
+    _LAB_ROOT / "reasoning_v4" / "prompt_session.py",
 )
 PromptAgentSession = _v2_prompt.PromptAgentSession
 RoleAgentSession = _v3_prompt.RoleAgentSession

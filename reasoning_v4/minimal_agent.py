@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""role_setting_v4 终端入口。"""
+"""reasoning_v4 终端入口。"""
 from __future__ import annotations
 
 import os
@@ -23,7 +23,7 @@ def main() -> None:
 
     cfg = session.config
     print(
-        "role_setting_v4 已启动（基于 v3 角色栈 + Prompt 层 CoT"
+        "reasoning_v4 已启动（基于 v3 角色栈 + Prompt 层 CoT"
         + (" + 简化 ToT" if tot else "")
         + "）"
     )

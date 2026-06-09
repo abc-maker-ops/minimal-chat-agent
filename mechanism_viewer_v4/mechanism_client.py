@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""机制查看器 v4：仅 role_setting_v4（CoT / 简化 ToT）。"""
+"""机制查看器 v4：仅 reasoning_v4（CoT / 简化 ToT）。"""
 from __future__ import annotations
 
 import sys

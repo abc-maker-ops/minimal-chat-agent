@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""从 role_setting_v4 目录启动机制查看器 v4。"""
+"""从 reasoning_v4 目录启动机制查看器 v4。"""
 from __future__ import annotations
 
 import sys
