@@ -5,12 +5,10 @@
 | 目录 | 说明 |
 |------|------|
 | [`minimal_chat_v1/`](minimal_chat_v1/) | **第 02 篇 · 终端 CLI**（无 system） |
-| [`mechanism_viewer_v1/`](mechanism_viewer_v1/) | **机制查看器**（桌面 GUI；可切换 v1 / v2 / v3 角色设定） |
-| [`mechanism_viewer_v2/`](mechanism_viewer_v2/) | 查看器便捷入口，默认选中第 03 篇 Few-shot |
 | [`system_prompt_v2/`](system_prompt_v2/) | **第 03 篇 · system + Few-shot / Zero-shot** |
 | [`role_setting_v3/`](role_setting_v3/) | **第 04 篇 · 多角色 YAML + 指定/自动选取角色** |
-| [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（概念 + 初版实现）** |
-| [`reasoning_v5/`](reasoning_v5/) | **第 06 篇 · 对标厂商：自洽性 + 并行汇总（GoT 简化）** |
+| [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（CoT / ToT）** |
+| [`reflection_v5/`](reflection_v5/) | **第 06 篇 · 批评 / 精炼 / 自洽性（Reflection 质检）** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -32,7 +30,7 @@ pip install -r requirements.txt
 python minimal_agent.py
 ```
 
-Zero-shot 对照：`$env:USE_FEW_SHOT="0"` 后重启。机制查看器见 [`mechanism_viewer_v2/README.md`](mechanism_viewer_v2/README.md)。
+Zero-shot 对照：`$env:USE_FEW_SHOT="0"` 后重启。
 
 ## 第 04 篇（多角色 + 自动选取角色）
 
@@ -44,8 +42,6 @@ pip install -r requirements.txt
 python minimal_agent.py
 ```
 
-机制查看器顶栏可选 **第04篇 · 角色设定**（Few-shot / Zero-shot / 自动选取角色）。见 [`mechanism_viewer_v3/README.md`](mechanism_viewer_v3/README.md)。
-
 ## 第 05 篇（思维链 + 简化思维树）
 
 ```powershell
@@ -56,19 +52,31 @@ pip install -r requirements.txt
 python minimal_agent.py
 ```
 
-思维树对照：`$env:REASONING_MODE="tot"` 后重启。机制查看器见 [`mechanism_viewer_v4/README.md`](mechanism_viewer_v4/README.md)。
+思维树对照：`$env:REASONING_MODE="tot"` 后重启。
 
-## 第 06 篇（对标厂商实现）
+## 第 06 篇（批评 / 精炼 / 自洽性）
 
 ```powershell
 $env:ZHIPU_API_KEY="你的智谱Key"
 $env:AGENT_ROLE="teacher"
-cd reasoning_v5
+cd reflection_v5
 pip install -r requirements.txt
 python minimal_agent.py
 ```
 
-模式对照：`REASONING_MODE=cot|tot|consistency|graph`。机制查看器见 [`mechanism_viewer_v5/README.md`](mechanism_viewer_v5/README.md)。
+质检模式：`$env:QUALITY_MODE="consistency"`（自洽性）或 `"refine"`（批评 + 精炼）；默认 `off` 等同 v4 CoT/ToT。叠加思维树：`$env:REASONING_MODE="tot"`。
+
+## 机制查看器
+
+桌面 GUI，可视化 `messages`、角色设定、推理与质检旁路、API 原始报文等。核心实现在 [`mechanism_viewer_v1/`](mechanism_viewer_v1/)；`mechanism_viewer_v2`～`v5` 为各篇便捷入口（双击 `启动机制查看器.bat` 或运行目录下 `mechanism_client.py`）。
+
+| 目录 | 默认选中 |
+|------|----------|
+| [`mechanism_viewer_v1/`](mechanism_viewer_v1/) | 第 02 篇 · minimal |
+| [`mechanism_viewer_v2/`](mechanism_viewer_v2/) | 第 03 篇 · Few-shot |
+| [`mechanism_viewer_v3/`](mechanism_viewer_v3/) | 第 04 篇 · 角色设定 |
+| [`mechanism_viewer_v4/`](mechanism_viewer_v4/) | 第 05 篇 · CoT |
+| [`mechanism_viewer_v5/`](mechanism_viewer_v5/) | 第 06 篇 · 批评与精炼 |
 
 ## 来源与关注
 

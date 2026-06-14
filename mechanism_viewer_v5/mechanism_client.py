@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""机制查看器 v5：reasoning_v5 全模式。"""
+"""机制查看器 v5：reflection_v5 质检与修订。"""
 from __future__ import annotations
 
 import importlib.util

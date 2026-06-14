@@ -48,10 +48,6 @@ _v4_prompt = _load_lab_module(
     "reasoning_v4_prompt_session",
     _LAB_ROOT / "reasoning_v4" / "prompt_session.py",
 )
-_v5_prompt = _load_lab_module(
-    "reasoning_v5_prompt_session",
-    _LAB_ROOT / "reasoning_v5" / "prompt_session.py",
-)
 _refl_prompt = _load_lab_module(
     "reflection_v5_prompt_session",
     _LAB_ROOT / "reflection_v5" / "prompt_session.py",
@@ -59,7 +55,6 @@ _refl_prompt = _load_lab_module(
 PromptAgentSession = _v2_prompt.PromptAgentSession
 RoleAgentSession = _v3_prompt.RoleAgentSession
 CotAgentSession = _v4_prompt.CotAgentSession
-ReasoningV5Session = _v5_prompt.ReasoningV5Session
 ReflectionAgentSession = _refl_prompt.ReflectionAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
@@ -175,11 +170,6 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "v5_tot_refine_fewshot",
         "第06篇 · 思维树 + 批评精炼",
         "计划比较选定后再批评修订",
-    ),
-    AgentVersionSpec(
-        "v5_graph_fewshot",
-        "第06篇 · 并行汇总",
-        "子题 fan-out → 汇总 fan-in（简化 GoT）",
     ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
@@ -309,12 +299,6 @@ def _is_reasoning(version_id: str) -> bool:
     return _is_v4(version_id) or _is_v5(version_id)
 
 
-def _v5_mode_from_version(version_id: str) -> str:
-    if version_id == "v5_graph_fewshot":
-        return "graph"
-    return "cot"
-
-
 def _reflection_params_from_version(version_id: str) -> tuple[str, bool]:
     table: dict[str, tuple[str, bool]] = {
         "v5_cot_fewshot": ("off", False),
@@ -373,14 +357,6 @@ def build_session(
     if version_id == "v1_minimal":
         return AgentSession()
     if _is_v5(version_id):
-        if version_id == "v5_graph_fewshot":
-            return ReasoningV5Session(
-                role_id=role_choice,
-                include_few_shot=True,
-                include_cot=True,
-                reasoning_mode="graph",
-                tot_enabled=False,
-            )
         quality_mode, tot_enabled = _reflection_params_from_version(version_id)
         return ReflectionAgentSession(
             role_id=role_choice,
@@ -449,22 +425,6 @@ def make_viewer_meta(
             role_source=_role_source_short(session),
             route_reason=session.route_reason or None,
             tot_enabled=session.tot_enabled,
-            include_cot=session.include_cot,
-        )
-    if _is_v5(version_id) and isinstance(session, ReasoningV5Session):
-        role = session.role
-        return ViewerMeta(
-            version_id=version_id,
-            version_label=spec.label,
-            few_shot=True,
-            seed_count=session.seed_count,
-            keeps_seed_on_reset=True,
-            role_id=session.role_id,
-            role_display_name=role.display_name if role else None,
-            role_version=role.version if role else None,
-            role_source=_role_source_short(session),
-            route_reason=session.route_reason or None,
-            tot_enabled=session.reasoning_mode == "tot",
             include_cot=session.include_cot,
         )
     if _is_v4(version_id) and isinstance(session, CotAgentSession):
