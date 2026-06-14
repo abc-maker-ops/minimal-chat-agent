@@ -12,6 +12,8 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from api_resilience import create_chat_completion
+
 _PKG_DIR = Path(__file__).resolve().parent
 load_dotenv(_PKG_DIR / ".env", override=False)
 load_dotenv(override=False)
@@ -182,7 +184,7 @@ class AgentSession:
             "body": body,
         }
 
-        response = self.client.chat.completions.create(**body)
+        response = create_chat_completion(self.client, **body)
         self._last_response = self._serialize_api_response(response)
         assistant_text = response.choices[0].message.content or ""
         self.messages.append({"role": "assistant", "content": assistant_text})

@@ -48,9 +48,19 @@ _v4_prompt = _load_lab_module(
     "reasoning_v4_prompt_session",
     _LAB_ROOT / "reasoning_v4" / "prompt_session.py",
 )
+_v5_prompt = _load_lab_module(
+    "reasoning_v5_prompt_session",
+    _LAB_ROOT / "reasoning_v5" / "prompt_session.py",
+)
+_refl_prompt = _load_lab_module(
+    "reflection_v5_prompt_session",
+    _LAB_ROOT / "reflection_v5" / "prompt_session.py",
+)
 PromptAgentSession = _v2_prompt.PromptAgentSession
 RoleAgentSession = _v3_prompt.RoleAgentSession
 CotAgentSession = _v4_prompt.CotAgentSession
+ReasoningV5Session = _v5_prompt.ReasoningV5Session
+ReflectionAgentSession = _refl_prompt.ReflectionAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
 _v3_root = str(_LAB_ROOT / "role_setting_v3")
@@ -141,6 +151,36 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第05篇 · 简化 ToT + CoT",
         "2～3 计划比选后再 CoT 回复",
     ),
+    AgentVersionSpec(
+        "v5_cot_fewshot",
+        "第06篇 · 思维链（Prompt 层）",
+        "同第05篇 Prompt CoT，v5 代码栈",
+    ),
+    AgentVersionSpec(
+        "v5_tot_fewshot",
+        "第06篇 · 简化思维树",
+        "对标 Orchestrator 计划比选（同 v4 ToT）",
+    ),
+    AgentVersionSpec(
+        "v5_consistency_fewshot",
+        "第06篇 · 自洽性",
+        "多样本结论投票（Self-Consistency）",
+    ),
+    AgentVersionSpec(
+        "v5_refine_fewshot",
+        "第06篇 · 批评与精炼",
+        "Self-Refine 式 generate → critique → revise",
+    ),
+    AgentVersionSpec(
+        "v5_tot_refine_fewshot",
+        "第06篇 · 思维树 + 批评精炼",
+        "计划比较选定后再批评修订",
+    ),
+    AgentVersionSpec(
+        "v5_graph_fewshot",
+        "第06篇 · 并行汇总",
+        "子题 fan-out → 汇总 fan-in（简化 GoT）",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -196,6 +236,28 @@ VIEWER_PROFILES: dict[str, dict[str, Any]] = {
         "show_reasoning_tab": True,
         "show_raw_tab": True,
     },
+    "viewer5": {
+        "title": "机制查看器 v5",
+        "version_ids": (
+            "v1_minimal",
+            "v2_fewshot",
+            "v2_zeroshot",
+            "v3_fewshot",
+            "v3_zeroshot",
+            "v3_auto",
+            "v4_cot_fewshot",
+            "v4_cot_zeroshot",
+            "v4_tot_fewshot",
+            "v5_consistency_fewshot",
+            "v5_refine_fewshot",
+            "v5_tot_refine_fewshot",
+        ),
+        "default_version": "v5_refine_fewshot",
+        "show_role_tab": True,
+        "show_reasoning_tab": True,
+        "show_quality_tab": True,
+        "show_raw_tab": True,
+    },
 }
 
 
@@ -239,8 +301,33 @@ def _is_v4(version_id: str) -> bool:
     return version_id.startswith("v4_")
 
 
+def _is_v5(version_id: str) -> bool:
+    return version_id.startswith("v5_")
+
+
+def _is_reasoning(version_id: str) -> bool:
+    return _is_v4(version_id) or _is_v5(version_id)
+
+
+def _v5_mode_from_version(version_id: str) -> str:
+    if version_id == "v5_graph_fewshot":
+        return "graph"
+    return "cot"
+
+
+def _reflection_params_from_version(version_id: str) -> tuple[str, bool]:
+    table: dict[str, tuple[str, bool]] = {
+        "v5_cot_fewshot": ("off", False),
+        "v5_tot_fewshot": ("off", True),
+        "v5_consistency_fewshot": ("consistency", False),
+        "v5_refine_fewshot": ("refine", False),
+        "v5_tot_refine_fewshot": ("refine", True),
+    }
+    return table.get(version_id, ("off", False))
+
+
 def _is_role_agent(version_id: str) -> bool:
-    return _is_v3(version_id) or _is_v4(version_id)
+    return _is_v3(version_id) or _is_reasoning(version_id)
 
 
 def _role_source_short(session: RoleAgentSession | CotAgentSession) -> str:
@@ -285,6 +372,23 @@ def build_session(
 ) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v5(version_id):
+        if version_id == "v5_graph_fewshot":
+            return ReasoningV5Session(
+                role_id=role_choice,
+                include_few_shot=True,
+                include_cot=True,
+                reasoning_mode="graph",
+                tot_enabled=False,
+            )
+        quality_mode, tot_enabled = _reflection_params_from_version(version_id)
+        return ReflectionAgentSession(
+            role_id=role_choice,
+            include_few_shot=True,
+            include_cot=True,
+            quality_mode=quality_mode,
+            tot_enabled=tot_enabled,
+        )
     if _is_v4(version_id):
         include_few_shot = version_id != "v4_cot_zeroshot"
         tot_enabled = version_id == "v4_tot_fewshot"
@@ -330,6 +434,38 @@ def make_viewer_meta(
             few_shot=None,
             seed_count=0,
             keeps_seed_on_reset=False,
+        )
+    if _is_v5(version_id) and isinstance(session, ReflectionAgentSession):
+        role = session.role
+        return ViewerMeta(
+            version_id=version_id,
+            version_label=spec.label,
+            few_shot=True,
+            seed_count=session.seed_count,
+            keeps_seed_on_reset=True,
+            role_id=session.role_id,
+            role_display_name=role.display_name if role else None,
+            role_version=role.version if role else None,
+            role_source=_role_source_short(session),
+            route_reason=session.route_reason or None,
+            tot_enabled=session.tot_enabled,
+            include_cot=session.include_cot,
+        )
+    if _is_v5(version_id) and isinstance(session, ReasoningV5Session):
+        role = session.role
+        return ViewerMeta(
+            version_id=version_id,
+            version_label=spec.label,
+            few_shot=True,
+            seed_count=session.seed_count,
+            keeps_seed_on_reset=True,
+            role_id=session.role_id,
+            role_display_name=role.display_name if role else None,
+            role_version=role.version if role else None,
+            role_source=_role_source_short(session),
+            route_reason=session.route_reason or None,
+            tot_enabled=session.reasoning_mode == "tot",
+            include_cot=session.include_cot,
         )
     if _is_v4(version_id) and isinstance(session, CotAgentSession):
         few_shot = version_id != "v4_cot_zeroshot"
@@ -454,7 +590,9 @@ def _format_raw_dict(data: dict | None, empty_hint: str) -> str:
 
 
 def _format_one_request(rec: TurnRecord) -> str:
-    head = f"第 {rec.round} 轮 · 发送 → LLM\n" + "─" * 40 + "\n\n"
+    note = (rec.request or {}).get("note", "")
+    step = f" · {note}" if note else ""
+    head = f"第 {rec.round} 轮{step} · 发送 → LLM\n" + "─" * 40 + "\n\n"
     return head + _format_raw_dict(rec.request, "")
 
 
@@ -936,10 +1074,10 @@ class ReasoningPanel(tk.Frame):
         self, meta: ViewerMeta,
         session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
     ) -> None:
-        if not _is_v4(meta.version_id) or not isinstance(session, CotAgentSession):
+        if not _is_reasoning(meta.version_id) or not isinstance(session, CotAgentSession):
             for k in self._value_labels:
                 self._set(k, "—")
-            self._fill(self._r, "请切换到 v4 Agent 版本。")
+            self._fill(self._r, "请切换到 v4/v5 推理 Agent 版本。")
             self._fill(self._c, "")
             self._fill(self._p, "")
             return
@@ -956,6 +1094,26 @@ class ReasoningPanel(tk.Frame):
             lines = [f"{i}. {p}{' ← 选中' if p == session.selected_plan else ''}"
                      for i, p in enumerate(session.last_plans, 1)]
             self._fill(self._p, "\n\n".join(lines))
+        elif getattr(session, "last_consistency", None):
+            lc = session.last_consistency
+            self._set("rn_n", str(len(lc.conclusions)))
+            self._set("rn_sel", (session.consensus_conclusion or "—")[:120])
+            self._set(
+                "rn_reason",
+                f"一致率 {session.agreement_rate:.0%}（{lc.winner_count}/{len(lc.conclusions)}）",
+            )
+            lines = [
+                f"样本{i}: {c}{' ← 众数' if c.strip() == session.consensus_conclusion.strip() else ''}"
+                for i, c in enumerate(lc.conclusions, 1)
+            ]
+            self._fill(self._p, "\n\n".join(lines))
+        elif getattr(session, "last_graph_branches", None) and session.last_graph_branches:
+            branches = session.last_graph_branches
+            self._set("rn_n", str(len(branches)))
+            self._set("rn_sel", "并行汇总 → 主对话")
+            self._set("rn_reason", "fan-out / fan-in")
+            lines = [f"{i}. {b.question}\n   → {b.answer[:200]}" for i, b in enumerate(branches, 1)]
+            self._fill(self._p, "\n\n".join(lines))
         else:
             self._set("rn_n", "—")
             self._set("rn_sel", "—")
@@ -967,6 +1125,109 @@ class ReasoningPanel(tk.Frame):
         else:
             self._fill(self._r, "—")
             self._fill(self._c, "—")
+
+
+class QualityPanel(tk.Frame):
+    """reflection_v5：自洽性、批评与精炼旁路观测。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=C_BG)
+        self._value_labels: dict[str, tk.Label] = {}
+        info = tk.Frame(
+            self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1,
+            padx=12, pady=10,
+        )
+        info.pack(fill=tk.X, padx=4, pady=(4, 6))
+        for label, key in (
+            ("质检模式", "qn_mode"),
+            ("一致率 / 状态", "qn_rate"),
+            ("众数结论", "qn_winner"),
+        ):
+            row = tk.Frame(info, bg=C_SURFACE)
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, font=("Microsoft YaHei UI", 9), fg=C_MUTED,
+                     bg=C_SURFACE, width=14, anchor=tk.W).pack(side=tk.LEFT)
+            val = tk.Label(row, text="—", font=("Microsoft YaHei UI", 9), fg=C_TEXT,
+                           bg=C_SURFACE, anchor=tk.W, wraplength=420, justify=tk.LEFT)
+            val.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._value_labels[key] = val
+        for title, attr, height in (
+            ("自洽性 · 各次结论", "_samples", 5),
+            ("初稿（批评前）", "_draft", 6),
+            ("批评意见", "_critique", 5),
+            ("修订稿", "_refined", 6),
+        ):
+            tk.Label(self, text=title, font=("Microsoft YaHei UI", 9, "bold"),
+                     fg=C_TEXT, bg=C_BG, anchor=tk.W).pack(fill=tk.X, padx=8, pady=(4, 2))
+            wrap = tk.Frame(self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1)
+            wrap.pack(fill=tk.BOTH, expand=(attr == "_draft"), padx=4, pady=(0, 4))
+            box = scrolledtext.ScrolledText(
+                wrap, wrap=tk.WORD, height=height,
+                font=("Microsoft YaHei UI", 9), fg=C_TEXT, bg="#f8fafc",
+                relief=tk.FLAT, padx=8, pady=8,
+            )
+            box.pack(fill=tk.BOTH, expand=True)
+            box.configure(state=tk.DISABLED)
+            setattr(self, attr, box)
+
+    def _set(self, key: str, text: str, *, fg: str | None = None) -> None:
+        lbl = self._value_labels.get(key)
+        if lbl:
+            lbl.configure(text=text)
+            if fg:
+                lbl.configure(fg=fg)
+
+    def _fill(self, w: scrolledtext.ScrolledText, text: str) -> None:
+        w.configure(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert(tk.END, text or "（暂无）")
+        w.configure(state=tk.DISABLED)
+
+    def update_panel(
+        self, meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
+    ) -> None:
+        if not isinstance(session, ReflectionAgentSession):
+            self._set("qn_mode", "—")
+            self._set("qn_rate", "—")
+            self._set("qn_winner", "—")
+            for attr in ("_samples", "_draft", "_critique", "_refined"):
+                self._fill(getattr(self, attr), "请切换到第06篇 reflection_v5 版本。")
+            return
+
+        mode = session.quality_mode
+        mode_label = {
+            "off": "关闭",
+            "consistency": "自洽性",
+            "refine": "批评 + 精炼",
+            "all": "全开",
+        }.get(mode, mode)
+        self._set("qn_mode", mode_label)
+
+        if session.last_consistency:
+            lc = session.last_consistency
+            rate_text = (
+                f"{session.agreement_rate:.0%} "
+                f"（{lc.winner_count}/{len(lc.conclusions)}）"
+            )
+            if session.consistency_below_threshold:
+                self._set("qn_rate", rate_text + " · 低于阈值", fg=C_ERROR)
+            else:
+                self._set("qn_rate", rate_text, fg=C_SUCCESS)
+            self._set("qn_winner", (session.consensus_conclusion or "—")[:120])
+            lines = [
+                f"样本{i}: {c}{' ← 众数' if c.strip() == session.consensus_conclusion.strip() else ''}"
+                for i, c in enumerate(lc.conclusions, 1)
+            ]
+            self._fill(self._samples, "\n\n".join(lines))
+        else:
+            self._set("qn_rate", "—" if mode != "consistency" else "尚无采样")
+            self._set("qn_winner", "—")
+            self._fill(self._samples, "—")
+
+        self._fill(self._draft, session.last_draft or "—")
+        self._fill(self._critique, session.last_critique or "—")
+        self._fill(self._refined, session.last_refined or "—")
 
 
 class MechanismDashboard(tk.Frame):
@@ -1481,6 +1742,7 @@ class MechanismViewerApp:
         mech_frame = tk.Frame(notebook, bg=C_BG)
         role_frame = tk.Frame(notebook, bg=C_BG)
         reasoning_frame = tk.Frame(notebook, bg=C_BG)
+        quality_frame = tk.Frame(notebook, bg=C_BG)
         json_frame = tk.Frame(notebook, bg=C_BG)
         raw_frame = tk.Frame(notebook, bg=C_BG)
         notebook.add(mech_frame, text="  机制面板  ")
@@ -1488,6 +1750,8 @@ class MechanismViewerApp:
             notebook.add(role_frame, text="  角色设定  ")
         if self._profile_cfg["show_reasoning_tab"]:
             notebook.add(reasoning_frame, text="  推理与比选  ")
+        if self._profile_cfg.get("show_quality_tab"):
+            notebook.add(quality_frame, text="  质检与修订  ")
         notebook.add(json_frame, text="  messages JSON  ")
         if self._profile_cfg["show_raw_tab"]:
             notebook.add(raw_frame, text="  API 原始报文  ")
@@ -1504,6 +1768,11 @@ class MechanismViewerApp:
         if self._profile_cfg["show_reasoning_tab"]:
             self.reasoning_panel = ReasoningPanel(reasoning_frame)
             self.reasoning_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.quality_panel: QualityPanel | None = None
+        if self._profile_cfg.get("show_quality_tab"):
+            self.quality_panel = QualityPanel(quality_frame)
+            self.quality_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         json_wrap = tk.Frame(
             json_frame, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1
@@ -1791,6 +2060,8 @@ class MechanismViewerApp:
                 self.role_panel.update_panel(self.meta, self.session)
             if self.reasoning_panel:
                 self.reasoning_panel.update_panel(self.meta, self.session)
+            if self.quality_panel:
+                self.quality_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(None, err)
             return
         if err:
@@ -1799,6 +2070,8 @@ class MechanismViewerApp:
                 self.role_panel.update_panel(self.meta, self.session)
             if self.reasoning_panel:
                 self.reasoning_panel.update_panel(self.meta, self.session)
+            if self.quality_panel:
+                self.quality_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(snap, err)
             return
         assert snap is not None
@@ -1807,6 +2080,8 @@ class MechanismViewerApp:
             self.role_panel.update_panel(self.meta, self.session)
         if self.reasoning_panel:
             self.reasoning_panel.update_panel(self.meta, self.session)
+        if self.quality_panel:
+            self.quality_panel.update_panel(self.meta, self.session)
         self._refresh_data_views(snap)
 
     def _set_controls_enabled(self, enabled: bool) -> None:

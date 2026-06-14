@@ -9,7 +9,8 @@
 | [`mechanism_viewer_v2/`](mechanism_viewer_v2/) | 查看器便捷入口，默认选中第 03 篇 Few-shot |
 | [`system_prompt_v2/`](system_prompt_v2/) | **第 03 篇 · system + Few-shot / Zero-shot** |
 | [`role_setting_v3/`](role_setting_v3/) | **第 04 篇 · 多角色 YAML + 指定/自动选取角色** |
-| [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（CoT / ToT）** |
+| [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（概念 + 初版实现）** |
+| [`reasoning_v5/`](reasoning_v5/) | **第 06 篇 · 对标厂商：自洽性 + 并行汇总（GoT 简化）** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -56,6 +57,18 @@ python minimal_agent.py
 ```
 
 思维树对照：`$env:REASONING_MODE="tot"` 后重启。机制查看器见 [`mechanism_viewer_v4/README.md`](mechanism_viewer_v4/README.md)。
+
+## 第 06 篇（对标厂商实现）
+
+```powershell
+$env:ZHIPU_API_KEY="你的智谱Key"
+$env:AGENT_ROLE="teacher"
+cd reasoning_v5
+pip install -r requirements.txt
+python minimal_agent.py
+```
+
+模式对照：`REASONING_MODE=cot|tot|consistency|graph`。机制查看器见 [`mechanism_viewer_v5/README.md`](mechanism_viewer_v5/README.md)。
 
 ## 来源与关注
 

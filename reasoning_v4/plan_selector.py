@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "minimal_chat_v1"))
+from api_resilience import create_chat_completion  # noqa: E402
 
 MAX_PLANS = 3
 
@@ -38,7 +43,8 @@ def propose_plans(
         f"只输出 JSON 数组，元素为字符串，不要 Markdown 代码块或其它说明。\n\n"
         f"用户任务：{user_task}"
     )
-    resp = client.chat.completions.create(
+    resp = create_chat_completion(
+        client,
         model=model,
         messages=[
             {"role": "system", "content": system},
@@ -66,7 +72,8 @@ def select_plan(
         "只输出 JSON 对象：{\"index\": 1 到 N 的整数, \"reason\": \"一句话理由\"}\n\n"
         f"用户任务：{user_task}\n\n计划列表：\n{numbered}"
     )
-    resp = client.chat.completions.create(
+    resp = create_chat_completion(
+        client,
         model=model,
         messages=[{"role": "user", "content": user_prompt}],
     )
