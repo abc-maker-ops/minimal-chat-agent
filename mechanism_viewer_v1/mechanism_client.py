@@ -52,10 +52,16 @@ _refl_prompt = _load_lab_module(
     "reflection_v5_prompt_session",
     _LAB_ROOT / "reflection_v5" / "prompt_session.py",
 )
+_react_prompt = _load_lab_module(
+    "react_v6_prompt_session",
+    _LAB_ROOT / "react_v6" / "prompt_session.py",
+)
 PromptAgentSession = _v2_prompt.PromptAgentSession
 RoleAgentSession = _v3_prompt.RoleAgentSession
 CotAgentSession = _v4_prompt.CotAgentSession
 ReflectionAgentSession = _refl_prompt.ReflectionAgentSession
+CommercialAgentSession = _react_prompt.CommercialAgentSession
+ReactAgentSession = CommercialAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
 _v3_root = str(_LAB_ROOT / "role_setting_v3")
@@ -171,6 +177,11 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第06篇 · 思维树 + 批评精炼",
         "计划比较选定后再批评修订",
     ),
+    AgentVersionSpec(
+        "v6_commercial",
+        "第07篇 · 商用 Agent",
+        "一体化运行机制：自动选角/比选/质检 + ReAct",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -248,6 +259,17 @@ VIEWER_PROFILES: dict[str, dict[str, Any]] = {
         "show_quality_tab": True,
         "show_raw_tab": True,
     },
+    "viewer6": {
+        "title": "机制查看器 v6",
+        "version_ids": ("v6_commercial",),
+        "default_version": "v6_commercial",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_quality_tab": False,
+        "show_tools_tab": False,
+        "show_trajectory_tab": True,
+        "show_raw_tab": True,
+    },
 }
 
 
@@ -295,8 +317,12 @@ def _is_v5(version_id: str) -> bool:
     return version_id.startswith("v5_")
 
 
+def _is_v6(version_id: str) -> bool:
+    return version_id.startswith("v6_")
+
+
 def _is_reasoning(version_id: str) -> bool:
-    return _is_v4(version_id) or _is_v5(version_id)
+    return _is_v4(version_id) or _is_v5(version_id) or _is_v6(version_id)
 
 
 def _reflection_params_from_version(version_id: str) -> tuple[str, bool]:
@@ -356,6 +382,8 @@ def build_session(
 ) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v6(version_id):
+        return CommercialAgentSession()
     if _is_v5(version_id):
         quality_mode, tot_enabled = _reflection_params_from_version(version_id)
         return ReflectionAgentSession(
@@ -410,6 +438,22 @@ def make_viewer_meta(
             few_shot=None,
             seed_count=0,
             keeps_seed_on_reset=False,
+        )
+    if _is_v6(version_id) and isinstance(session, CommercialAgentSession):
+        role = session.role
+        return ViewerMeta(
+            version_id=version_id,
+            version_label=spec.label,
+            few_shot=True,
+            seed_count=session.seed_count,
+            keeps_seed_on_reset=True,
+            role_id=session.role_id,
+            role_display_name=role.display_name if role else None,
+            role_version=role.version if role else None,
+            role_source=_role_source_short(session),
+            route_reason=session.route_reason or None,
+            tot_enabled=False,
+            include_cot=True,
         )
     if _is_v5(version_id) and isinstance(session, ReflectionAgentSession):
         role = session.role
@@ -1190,6 +1234,147 @@ class QualityPanel(tk.Frame):
         self._fill(self._refined, session.last_refined or "—")
 
 
+class ToolsPanel(tk.Frame):
+    """react_v6：ReAct 工具调用链观测（可选 Tab）。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=C_BG)
+        self._value_labels: dict[str, tk.Label] = {}
+        info = tk.Frame(
+            self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1,
+            padx=12, pady=10,
+        )
+        info.pack(fill=tk.X, padx=4, pady=(4, 6))
+        for label, key in (
+            ("ReAct 模式", "tl_mode"),
+            ("API 轮次", "tl_rounds"),
+            ("工具步数", "tl_steps"),
+        ):
+            row = tk.Frame(info, bg=C_SURFACE)
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, font=("Microsoft YaHei UI", 9), fg=C_MUTED,
+                     bg=C_SURFACE, width=14, anchor=tk.W).pack(side=tk.LEFT)
+            val = tk.Label(row, text="—", font=("Microsoft YaHei UI", 9), fg=C_TEXT,
+                           bg=C_SURFACE, anchor=tk.W, wraplength=420, justify=tk.LEFT)
+            val.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._value_labels[key] = val
+        tk.Label(self, text="工具调用链（tool_call → Observation）",
+                 font=("Microsoft YaHei UI", 9, "bold"), fg=C_TEXT, bg=C_BG,
+                 anchor=tk.W).pack(fill=tk.X, padx=8, pady=(4, 2))
+        wrap = tk.Frame(self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1)
+        wrap.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        self._steps = scrolledtext.ScrolledText(
+            wrap, wrap=tk.WORD, height=14,
+            font=("Consolas", 9), fg=C_TEXT, bg="#f8fafc",
+            relief=tk.FLAT, padx=8, pady=8,
+        )
+        self._steps.pack(fill=tk.BOTH, expand=True)
+        self._steps.configure(state=tk.DISABLED)
+
+    def _set(self, key: str, text: str, *, fg: str | None = None) -> None:
+        lbl = self._value_labels.get(key)
+        if lbl:
+            lbl.configure(text=text)
+            if fg:
+                lbl.configure(fg=fg)
+
+    def _fill(self, w: scrolledtext.ScrolledText, text: str) -> None:
+        w.configure(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert(tk.END, text or "（暂无）")
+        w.configure(state=tk.DISABLED)
+
+    def update_panel(
+        self, meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
+    ) -> None:
+        if not isinstance(session, CommercialAgentSession):
+            self._set("tl_mode", "—")
+            self._set("tl_rounds", "—")
+            self._set("tl_steps", "—")
+            self._fill(self._steps, "请切换到第07篇 v6_commercial 版本。")
+            return
+        self._set("tl_mode", "一体化（始终开启）")
+        self._set("tl_rounds", str(session.react_steps_used or "—"))
+        n_tools = len(session.last_tool_steps)
+        step_text = str(n_tools)
+        if session.react_hit_limit:
+            self._set("tl_steps", step_text + " · 已达上限", fg=C_WARN)
+        else:
+            self._set("tl_steps", step_text, fg=C_SUCCESS if n_tools else C_TEXT)
+        lines: list[str] = []
+        for step in session.last_tool_steps:
+            status = "OK" if step.ok else "FAIL"
+            lines.append(
+                f"步骤 {step.step} [{status}] {step.tool_name}\n"
+                f"  参数: {step.arguments}\n"
+                f"  Observation: {step.observation}\n"
+            )
+        self._fill(self._steps, "\n".join(lines) if lines else "本轮尚无工具调用。")
+
+
+class TrajectoryPanel(tk.Frame):
+    """react_v6：本轮实际启用的机制与工具链（运行轨迹）。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=C_BG)
+        tk.Label(
+            self, text="本轮运行轨迹（程序自动决策，无需手选机制）",
+            font=("Microsoft YaHei UI", 9, "bold"), fg=C_TEXT, bg=C_BG, anchor=tk.W,
+        ).pack(fill=tk.X, padx=8, pady=(4, 2))
+        wrap1 = tk.Frame(self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1)
+        wrap1.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        self._trace = scrolledtext.ScrolledText(
+            wrap1, wrap=tk.WORD, height=10,
+            font=("Microsoft YaHei UI", 9), fg=C_TEXT, bg="#f8fafc",
+            relief=tk.FLAT, padx=8, pady=8,
+        )
+        self._trace.pack(fill=tk.BOTH, expand=True)
+        self._trace.configure(state=tk.DISABLED)
+        tk.Label(
+            self, text="工具调用链",
+            font=("Microsoft YaHei UI", 9, "bold"), fg=C_TEXT, bg=C_BG, anchor=tk.W,
+        ).pack(fill=tk.X, padx=8, pady=(4, 2))
+        wrap2 = tk.Frame(self, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1)
+        wrap2.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
+        self._tools = scrolledtext.ScrolledText(
+            wrap2, wrap=tk.WORD, height=8,
+            font=("Consolas", 9), fg=C_TEXT, bg="#f8fafc",
+            relief=tk.FLAT, padx=8, pady=8,
+        )
+        self._tools.pack(fill=tk.BOTH, expand=True)
+        self._tools.configure(state=tk.DISABLED)
+
+    def _fill(self, w: scrolledtext.ScrolledText, text: str) -> None:
+        w.configure(state=tk.NORMAL)
+        w.delete("1.0", tk.END)
+        w.insert(tk.END, text or "（暂无）")
+        w.configure(state=tk.DISABLED)
+
+    def update_panel(
+        self, meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
+    ) -> None:
+        if not isinstance(session, CommercialAgentSession):
+            self._fill(self._trace, "请使用第07篇 v6_commercial 版本。")
+            self._fill(self._tools, "—")
+            return
+        trace = session.runtime_trace
+        if trace:
+            self._fill(self._trace, trace.as_text())
+        else:
+            self._fill(self._trace, "发送消息后显示本轮自动启用的机制。")
+        lines: list[str] = []
+        for step in session.last_tool_steps:
+            status = "OK" if step.ok else "FAIL"
+            lines.append(
+                f"步骤 {step.step} [{status}] {step.tool_name}\n"
+                f"  参数: {step.arguments}\n"
+                f"  Observation: {step.observation}\n"
+            )
+        self._fill(self._tools, "\n".join(lines) if lines else "本轮无工具调用。")
+
+
 class MechanismDashboard(tk.Frame):
     """右侧机制面板：卡片 + 指标块，替代纯文本。"""
 
@@ -1703,6 +1888,8 @@ class MechanismViewerApp:
         role_frame = tk.Frame(notebook, bg=C_BG)
         reasoning_frame = tk.Frame(notebook, bg=C_BG)
         quality_frame = tk.Frame(notebook, bg=C_BG)
+        tools_frame = tk.Frame(notebook, bg=C_BG)
+        trajectory_frame = tk.Frame(notebook, bg=C_BG)
         json_frame = tk.Frame(notebook, bg=C_BG)
         raw_frame = tk.Frame(notebook, bg=C_BG)
         notebook.add(mech_frame, text="  机制面板  ")
@@ -1712,6 +1899,10 @@ class MechanismViewerApp:
             notebook.add(reasoning_frame, text="  推理与比选  ")
         if self._profile_cfg.get("show_quality_tab"):
             notebook.add(quality_frame, text="  质检与修订  ")
+        if self._profile_cfg.get("show_tools_tab"):
+            notebook.add(tools_frame, text="  工具与循环  ")
+        if self._profile_cfg.get("show_trajectory_tab"):
+            notebook.add(trajectory_frame, text="  运行轨迹  ")
         notebook.add(json_frame, text="  messages JSON  ")
         if self._profile_cfg["show_raw_tab"]:
             notebook.add(raw_frame, text="  API 原始报文  ")
@@ -1733,6 +1924,16 @@ class MechanismViewerApp:
         if self._profile_cfg.get("show_quality_tab"):
             self.quality_panel = QualityPanel(quality_frame)
             self.quality_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.tools_panel: ToolsPanel | None = None
+        if self._profile_cfg.get("show_tools_tab"):
+            self.tools_panel = ToolsPanel(tools_frame)
+            self.tools_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.trajectory_panel: TrajectoryPanel | None = None
+        if self._profile_cfg.get("show_trajectory_tab"):
+            self.trajectory_panel = TrajectoryPanel(trajectory_frame)
+            self.trajectory_panel.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         json_wrap = tk.Frame(
             json_frame, bg=C_SURFACE, highlightbackground=C_BORDER, highlightthickness=1
@@ -2022,6 +2223,10 @@ class MechanismViewerApp:
                 self.reasoning_panel.update_panel(self.meta, self.session)
             if self.quality_panel:
                 self.quality_panel.update_panel(self.meta, self.session)
+            if self.tools_panel:
+                self.tools_panel.update_panel(self.meta, self.session)
+            if self.trajectory_panel:
+                self.trajectory_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(None, err)
             return
         if err:
@@ -2032,6 +2237,10 @@ class MechanismViewerApp:
                 self.reasoning_panel.update_panel(self.meta, self.session)
             if self.quality_panel:
                 self.quality_panel.update_panel(self.meta, self.session)
+            if self.tools_panel:
+                self.tools_panel.update_panel(self.meta, self.session)
+            if self.trajectory_panel:
+                self.trajectory_panel.update_panel(self.meta, self.session)
             self._refresh_data_views(snap, err)
             return
         assert snap is not None
@@ -2042,6 +2251,10 @@ class MechanismViewerApp:
             self.reasoning_panel.update_panel(self.meta, self.session)
         if self.quality_panel:
             self.quality_panel.update_panel(self.meta, self.session)
+        if self.tools_panel:
+            self.tools_panel.update_panel(self.meta, self.session)
+        if self.trajectory_panel:
+            self.trajectory_panel.update_panel(self.meta, self.session)
         self._refresh_data_views(snap)
 
     def _set_controls_enabled(self, enabled: bool) -> None:

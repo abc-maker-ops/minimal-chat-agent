@@ -9,6 +9,7 @@
 | [`role_setting_v3/`](role_setting_v3/) | **第 04 篇 · 多角色 YAML + 指定/自动选取角色** |
 | [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（CoT / ToT）** |
 | [`reflection_v5/`](reflection_v5/) | **第 06 篇 · 批评 / 精炼 / 自洽性（Reflection 质检）** |
+| [`react_v6/`](react_v6/) | **第 07 篇 · 商用 Agent 一体化运行机制 + ReAct** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -66,9 +67,22 @@ python minimal_agent.py
 
 质检模式：`$env:QUALITY_MODE="consistency"`（自洽性）或 `"refine"`（批评 + 精炼）；默认 `off` 等同 v4 CoT/ToT。叠加思维树：`$env:REASONING_MODE="tot"`。
 
+## 第 07 篇（商用 Agent · 一体化运行机制 + ReAct）
+
+```powershell
+$env:ZHIPU_API_KEY="你的智谱Key"
+cd react_v6
+pip install -r requirements.txt
+python minimal_agent.py
+```
+
+无需设置 `AGENT_ROLE` / `REACT_MODE` / `QUALITY_MODE` / `REASONING_MODE`；程序按任务自动选角、比选、修订与 ReAct。安全上限：`MAX_REACT_STEPS=8`。
+
+前六篇机制对照仍可用 `mechanism_viewer_v2`～`v5`。
+
 ## 机制查看器
 
-桌面 GUI，可视化 `messages`、角色设定、推理与质检旁路、API 原始报文等。核心实现在 [`mechanism_viewer_v1/`](mechanism_viewer_v1/)；`mechanism_viewer_v2`～`v5` 为各篇便捷入口（双击 `启动机制查看器.bat` 或运行目录下 `mechanism_client.py`）。
+桌面 GUI，可视化 `messages`、角色设定、推理与质检旁路、API 原始报文等。核心实现在 [`mechanism_viewer_v1/`](mechanism_viewer_v1/)；`mechanism_viewer_v2`～`v6` 为各篇便捷入口（双击 `启动机制查看器.bat` 或运行目录下 `mechanism_client.py`）。
 
 | 目录 | 默认选中 |
 |------|----------|
@@ -77,6 +91,7 @@ python minimal_agent.py
 | [`mechanism_viewer_v3/`](mechanism_viewer_v3/) | 第 04 篇 · 角色设定 |
 | [`mechanism_viewer_v4/`](mechanism_viewer_v4/) | 第 05 篇 · CoT |
 | [`mechanism_viewer_v5/`](mechanism_viewer_v5/) | 第 06 篇 · 批评与精炼 |
+| [`mechanism_viewer_v6/`](mechanism_viewer_v6/) | **第 07 篇 · 商用 Agent（运行轨迹）** |
 
 ## 来源与关注
 
