@@ -52,6 +52,10 @@ _refl_prompt = _load_lab_module(
     "reflection_v5_prompt_session",
     _LAB_ROOT / "reflection_v5" / "prompt_session.py",
 )
+_react_v7_prompt = _load_lab_module(
+    "react_v7_prompt_session",
+    _LAB_ROOT / "react_v7" / "prompt_session.py",
+)
 _react_prompt = _load_lab_module(
     "react_v6_prompt_session",
     _LAB_ROOT / "react_v6" / "prompt_session.py",
@@ -61,6 +65,7 @@ RoleAgentSession = _v3_prompt.RoleAgentSession
 CotAgentSession = _v4_prompt.CotAgentSession
 ReflectionAgentSession = _refl_prompt.ReflectionAgentSession
 CommercialAgentSession = _react_prompt.CommercialAgentSession
+DeliveryAgentSession = _react_v7_prompt.DeliveryAgentSession
 ReactAgentSession = CommercialAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
@@ -182,6 +187,11 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第07篇 · 商用 Agent",
         "一体化运行机制：自动选角/比选/质检 + ReAct",
     ),
+    AgentVersionSpec(
+        "v7_delivery",
+        "第08篇 · 结构化交付",
+        "文件工具 + Markdown/JSON/XML 交付 + done 机器验收",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -270,6 +280,17 @@ VIEWER_PROFILES: dict[str, dict[str, Any]] = {
         "show_trajectory_tab": True,
         "show_raw_tab": True,
     },
+    "viewer7": {
+        "title": "机制查看器 v7",
+        "version_ids": ("v7_delivery",),
+        "default_version": "v7_delivery",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_quality_tab": False,
+        "show_tools_tab": False,
+        "show_trajectory_tab": True,
+        "show_raw_tab": True,
+    },
 }
 
 
@@ -321,8 +342,23 @@ def _is_v6(version_id: str) -> bool:
     return version_id.startswith("v6_")
 
 
+def _is_v7(version_id: str) -> bool:
+    return version_id.startswith("v7_")
+
+
+def _is_commercial_react_session(
+    session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession,
+) -> bool:
+    return isinstance(session, (CommercialAgentSession, DeliveryAgentSession))
+
+
 def _is_reasoning(version_id: str) -> bool:
-    return _is_v4(version_id) or _is_v5(version_id) or _is_v6(version_id)
+    return (
+        _is_v4(version_id)
+        or _is_v5(version_id)
+        or _is_v6(version_id)
+        or _is_v7(version_id)
+    )
 
 
 def _reflection_params_from_version(version_id: str) -> tuple[str, bool]:
@@ -382,6 +418,8 @@ def build_session(
 ) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v7(version_id):
+        return DeliveryAgentSession()
     if _is_v6(version_id):
         return CommercialAgentSession()
     if _is_v5(version_id):
@@ -439,7 +477,9 @@ def make_viewer_meta(
             seed_count=0,
             keeps_seed_on_reset=False,
         )
-    if _is_v6(version_id) and isinstance(session, CommercialAgentSession):
+    if (_is_v6(version_id) or _is_v7(version_id)) and _is_commercial_react_session(
+        session
+    ):
         role = session.role
         return ViewerMeta(
             version_id=version_id,
@@ -691,10 +731,18 @@ def startup_message(meta: ViewerMeta) -> str:
         if _is_v4(meta.version_id):
             mode = "简化 ToT + CoT" if meta.tot_enabled else "CoT"
             msg += f" 推理: {mode}。"
+    elif _is_v6(meta.version_id) or _is_v7(meta.version_id):
+        msg += " 一体化运行机制（自动选角、按需比选/精炼）。"
+        if _is_v7(meta.version_id):
+            msg += " 工具含 read/write/done；详情见「运行轨迹」与机制面板 ReAct 区。"
+        else:
+            msg += " ReAct + calculator；详情见「运行轨迹」。"
     if meta.seed_count:
         msg += f" 种子 {meta.seed_count} 条，见右侧 JSON。"
     elif _is_v3(meta.version_id) or _is_v4(meta.version_id):
         msg += " 发送首条消息后注入固定前缀。"
+    elif _is_v6(meta.version_id) or _is_v7(meta.version_id):
+        msg += " 发送首条消息后加载角色与 Few-shot。"
     else:
         msg += " 见右侧 JSON。"
     return msg
@@ -1288,11 +1336,11 @@ class ToolsPanel(tk.Frame):
         self, meta: ViewerMeta,
         session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
     ) -> None:
-        if not isinstance(session, CommercialAgentSession):
+        if not _is_commercial_react_session(session):
             self._set("tl_mode", "—")
             self._set("tl_rounds", "—")
             self._set("tl_steps", "—")
-            self._fill(self._steps, "请切换到第07篇 v6_commercial 版本。")
+            self._fill(self._steps, "请切换到第07篇 v6 或第08篇 v7 版本。")
             return
         self._set("tl_mode", "一体化（始终开启）")
         self._set("tl_rounds", str(session.react_steps_used or "—"))
@@ -1355,8 +1403,8 @@ class TrajectoryPanel(tk.Frame):
         self, meta: ViewerMeta,
         session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
     ) -> None:
-        if not isinstance(session, CommercialAgentSession):
-            self._fill(self._trace, "请使用第07篇 v6_commercial 版本。")
+        if not _is_commercial_react_session(session):
+            self._fill(self._trace, "请使用第07篇 v6 或第08篇 v7 版本。")
             self._fill(self._tools, "—")
             return
         trace = session.runtime_trace
@@ -1504,6 +1552,12 @@ class MechanismDashboard(tk.Frame):
         self._row(ver_body, "选角来源", "ver_role_src")
         self._row(ver_body, "选角依据", "ver_route_reason")
 
+        react_body = self._card(p, "ReAct · 本轮")
+        self._row(react_body, "注册工具", "react_tools")
+        self._row(react_body, "工作区", "react_workspace")
+        self._row(react_body, "LLM · 工具", "react_steps")
+        self._row(react_body, "done 验收", "react_done")
+
         cfg_body = self._card(p, "运行配置")
         self._row(cfg_body, "模型", "cfg_model")
         self._row(cfg_body, "接口", "cfg_url", mono=True)
@@ -1554,7 +1608,12 @@ class MechanismDashboard(tk.Frame):
         if self._badge_label:
             self._badge_label.configure(text=text, bg=bg, fg=fg)
 
-    def update_dashboard(self, snap: MechanismSnapshot, meta: ViewerMeta) -> None:
+    def update_dashboard(
+        self,
+        snap: MechanismSnapshot,
+        meta: ViewerMeta,
+        session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None = None,
+    ) -> None:
         if self._error_label:
             self._error_label.pack_forget()
 
@@ -1618,7 +1677,9 @@ class MechanismDashboard(tk.Frame):
             self._set("ver_structure", base)
             self._set("ver_seed", f"{meta.seed_count} 条（仅 system）")
 
-        if _is_v3(meta.version_id) or _is_v4(meta.version_id):
+        if _is_v3(meta.version_id) or _is_v4(meta.version_id) or _is_v6(
+            meta.version_id
+        ) or _is_v7(meta.version_id):
             if meta.role_id:
                 name = meta.role_display_name or meta.role_id
                 ver = f" · v{meta.role_version}" if meta.role_version else ""
@@ -1638,6 +1699,58 @@ class MechanismDashboard(tk.Frame):
             self._set("ver_role", "—")
             self._set("ver_role_src", "—")
             self._set("ver_route_reason", "—")
+
+        if _is_v6(meta.version_id) or _is_v7(meta.version_id):
+            if _is_v7(meta.version_id):
+                self._set_badge("v7 · 读写 + done", C_SUCCESS_BG, C_SUCCESS)
+                self._set(
+                    "ver_structure",
+                    "system + Few-shot + CoT + ReAct + read/list/write + done",
+                )
+                self._set(
+                    "react_tools",
+                    "calculator, read_file, list_dir, write_text, done",
+                )
+            else:
+                self._set_badge("v6 · ReAct", C_SUCCESS_BG, C_SUCCESS)
+                self._set(
+                    "ver_structure",
+                    "system + Few-shot + CoT + ReAct + calculator",
+                )
+                self._set("react_tools", "calculator")
+            if session and _is_commercial_react_session(session):
+                wp = getattr(session, "workspace_path", None)
+                self._set(
+                    "react_workspace",
+                    str(wp) if wp and _is_v7(meta.version_id) else "—",
+                )
+                if session.react_steps_used or session.last_tool_steps:
+                    self._set(
+                        "react_steps",
+                        f"{session.react_steps_used} 轮 LLM，工具 {len(session.last_tool_steps)} 次",
+                    )
+                    if _is_v7(meta.version_id):
+                        done = session.last_done_ok
+                        if done is True:
+                            self._set("react_done", "通过", fg=C_SUCCESS)
+                        elif done is False:
+                            self._set("react_done", "未通过", fg=C_ERROR)
+                        else:
+                            self._set("react_done", "本轮未调用")
+                    else:
+                        self._set("react_done", "—")
+                else:
+                    self._set("react_steps", "—（发消息后显示）")
+                    self._set("react_done", "—")
+            else:
+                self._set("react_workspace", "—")
+                self._set("react_steps", "—")
+                self._set("react_done", "—")
+        else:
+            self._set("react_tools", "—")
+            self._set("react_workspace", "—")
+            self._set("react_steps", "—")
+            self._set("react_done", "—")
 
         self._set("cfg_model", cfg.model)
         self._set("cfg_url", cfg.base_url)
@@ -2244,7 +2357,7 @@ class MechanismViewerApp:
             self._refresh_data_views(snap, err)
             return
         assert snap is not None
-        self.dashboard.update_dashboard(snap, self.meta)
+        self.dashboard.update_dashboard(snap, self.meta, self.session)
         if self.role_panel:
             self.role_panel.update_panel(self.meta, self.session)
         if self.reasoning_panel:
@@ -2327,6 +2440,37 @@ class MechanismViewerApp:
                 n = len(self.session.last_plans)
                 sel = self.session.selected_plan or "—"
                 self._append_chat("system", f"[ToT] 生成 {n} 个计划，选中: {sel}")
+        elif _is_commercial_react_session(self.session):
+            prev_id = self.meta.role_id
+            self.meta = make_viewer_meta(self._version_id, self.session)
+            if (
+                self.session.round_count == 1
+                and self.session.role_id
+                and prev_id is None
+            ):
+                name = (
+                    self.session.role.display_name
+                    if self.session.role
+                    else self.session.role_id
+                )
+                reason = self.session.route_reason or "—"
+                self._append_chat(
+                    "system",
+                    f"[选角] → {self.session.role_id} ({name}) · {reason}",
+                )
+            n_tools = len(self.session.last_tool_steps)
+            if n_tools:
+                self._append_chat(
+                    "system",
+                    f"[ReAct] {self.session.react_steps_used} 轮 LLM，工具 {n_tools} 次",
+                )
+            if _is_v7(self._version_id) and self.session.last_done_ok is not None:
+                done_txt = (
+                    "通过"
+                    if self.session.last_done_ok
+                    else "未通过（见运行轨迹）"
+                )
+                self._append_chat("system", f"[done 验收] {done_txt}")
         self._refresh_panels(snap)
         self._finish_turn("就绪")
 

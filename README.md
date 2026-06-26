@@ -10,6 +10,7 @@
 | [`reasoning_v4/`](reasoning_v4/) | **第 05 篇 · 思维链 / 简化思维树（CoT / ToT）** |
 | [`reflection_v5/`](reflection_v5/) | **第 06 篇 · 批评 / 精炼 / 自洽性（Reflection 质检）** |
 | [`react_v6/`](react_v6/) | **第 07 篇 · 商用 Agent 一体化运行机制 + ReAct** |
+| [`react_v7/`](react_v7/) | **第 08 篇 · ReAct 加强 + done 验收** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -78,7 +79,18 @@ python minimal_agent.py
 
 无需设置 `AGENT_ROLE` / `REACT_MODE` / `QUALITY_MODE` / `REASONING_MODE`；程序按任务自动选角、比选、修订与 ReAct。安全上限：`MAX_REACT_STEPS=8`。
 
-前六篇机制对照仍可用 `mechanism_viewer_v2`～`v5`。
+## 第 08 篇（结构化交付 · done 机器验收）
+
+```powershell
+$env:ZHIPU_API_KEY="你的智谱Key"
+cd react_v7
+pip install -r requirements.txt
+python minimal_agent.py
+```
+
+工作区默认 `react_v7/workspace/`（可用 `AGENT_WORKSPACE` 覆盖）。工具含 `read_file` / `list_dir` / `write_text` / `done`。`MAX_REACT_STEPS` 默认 `10`。
+
+前七篇机制对照仍可用 `mechanism_viewer_v2`～`v6`。
 
 ## 机制查看器
 
@@ -92,6 +104,7 @@ python minimal_agent.py
 | [`mechanism_viewer_v4/`](mechanism_viewer_v4/) | 第 05 篇 · CoT |
 | [`mechanism_viewer_v5/`](mechanism_viewer_v5/) | 第 06 篇 · 批评与精炼 |
 | [`mechanism_viewer_v6/`](mechanism_viewer_v6/) | **第 07 篇 · 商用 Agent（运行轨迹）** |
+| [`mechanism_viewer_v7/`](mechanism_viewer_v7/) | **第 08 篇 · ReAct 加强（运行轨迹 + done）** |
 
 ## 来源与关注
 
