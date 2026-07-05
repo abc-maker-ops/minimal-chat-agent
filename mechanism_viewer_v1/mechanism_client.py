@@ -56,6 +56,10 @@ _react_v7_prompt = _load_lab_module(
     "react_v7_prompt_session",
     _LAB_ROOT / "react_v7" / "prompt_session.py",
 )
+_react_v8_prompt = _load_lab_module(
+    "react_v8_prompt_session",
+    _LAB_ROOT / "react_v8" / "prompt_session.py",
+)
 _react_prompt = _load_lab_module(
     "react_v6_prompt_session",
     _LAB_ROOT / "react_v6" / "prompt_session.py",
@@ -66,6 +70,7 @@ CotAgentSession = _v4_prompt.CotAgentSession
 ReflectionAgentSession = _refl_prompt.ReflectionAgentSession
 CommercialAgentSession = _react_prompt.CommercialAgentSession
 DeliveryAgentSession = _react_v7_prompt.DeliveryAgentSession
+ToolEngineeredAgentSession = _react_v8_prompt.ToolEngineeredAgentSession
 ReactAgentSession = CommercialAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
@@ -192,6 +197,11 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第08篇 · 结构化交付",
         "文件工具 + Markdown/JSON/XML 交付 + done 机器验收",
     ),
+    AgentVersionSpec(
+        "v8_tools",
+        "第09篇 · 工具工程化",
+        "JSON Schema 描述 + tool_choice + parallel + forced done",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -291,6 +301,17 @@ VIEWER_PROFILES: dict[str, dict[str, Any]] = {
         "show_trajectory_tab": True,
         "show_raw_tab": True,
     },
+    "viewer8": {
+        "title": "机制查看器 v8",
+        "version_ids": ("v8_tools",),
+        "default_version": "v8_tools",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_quality_tab": False,
+        "show_tools_tab": False,
+        "show_trajectory_tab": True,
+        "show_raw_tab": True,
+    },
 }
 
 
@@ -346,10 +367,21 @@ def _is_v7(version_id: str) -> bool:
     return version_id.startswith("v7_")
 
 
+def _is_v8(version_id: str) -> bool:
+    return version_id.startswith("v8_")
+
+
+def _is_v7_or_v8(version_id: str) -> bool:
+    return _is_v7(version_id) or _is_v8(version_id)
+
+
 def _is_commercial_react_session(
     session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession,
 ) -> bool:
-    return isinstance(session, (CommercialAgentSession, DeliveryAgentSession))
+    return isinstance(
+        session,
+        (CommercialAgentSession, DeliveryAgentSession, ToolEngineeredAgentSession),
+    )
 
 
 def _is_reasoning(version_id: str) -> bool:
@@ -358,6 +390,7 @@ def _is_reasoning(version_id: str) -> bool:
         or _is_v5(version_id)
         or _is_v6(version_id)
         or _is_v7(version_id)
+        or _is_v8(version_id)
     )
 
 
@@ -418,6 +451,8 @@ def build_session(
 ) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v8(version_id):
+        return ToolEngineeredAgentSession()
     if _is_v7(version_id):
         return DeliveryAgentSession()
     if _is_v6(version_id):
@@ -477,9 +512,9 @@ def make_viewer_meta(
             seed_count=0,
             keeps_seed_on_reset=False,
         )
-    if (_is_v6(version_id) or _is_v7(version_id)) and _is_commercial_react_session(
-        session
-    ):
+    if (
+        _is_v6(version_id) or _is_v7_or_v8(version_id)
+    ) and _is_commercial_react_session(session):
         role = session.role
         return ViewerMeta(
             version_id=version_id,
@@ -731,9 +766,11 @@ def startup_message(meta: ViewerMeta) -> str:
         if _is_v4(meta.version_id):
             mode = "简化 ToT + CoT" if meta.tot_enabled else "CoT"
             msg += f" 推理: {mode}。"
-    elif _is_v6(meta.version_id) or _is_v7(meta.version_id):
+    elif _is_v6(meta.version_id) or _is_v7_or_v8(meta.version_id):
         msg += " 一体化运行机制（自动选角、按需比选/精炼）。"
-        if _is_v7(meta.version_id):
+        if _is_v8(meta.version_id):
+            msg += " 工具含 tool_choice/parallel + read/write/done；详情见「运行轨迹」。"
+        elif _is_v7(meta.version_id):
             msg += " 工具含 read/write/done；详情见「运行轨迹」与机制面板 ReAct 区。"
         else:
             msg += " ReAct + calculator；详情见「运行轨迹」。"
@@ -741,7 +778,7 @@ def startup_message(meta: ViewerMeta) -> str:
         msg += f" 种子 {meta.seed_count} 条，见右侧 JSON。"
     elif _is_v3(meta.version_id) or _is_v4(meta.version_id):
         msg += " 发送首条消息后注入固定前缀。"
-    elif _is_v6(meta.version_id) or _is_v7(meta.version_id):
+    elif _is_v6(meta.version_id) or _is_v7_or_v8(meta.version_id):
         msg += " 发送首条消息后加载角色与 Few-shot。"
     else:
         msg += " 见右侧 JSON。"
@@ -1340,7 +1377,7 @@ class ToolsPanel(tk.Frame):
             self._set("tl_mode", "—")
             self._set("tl_rounds", "—")
             self._set("tl_steps", "—")
-            self._fill(self._steps, "请切换到第07篇 v6 或第08篇 v7 版本。")
+            self._fill(self._steps, "请切换到第07篇 v6、第08篇 v7 或第09篇 v8 版本。")
             return
         self._set("tl_mode", "一体化（始终开启）")
         self._set("tl_rounds", str(session.react_steps_used or "—"))
@@ -1353,8 +1390,10 @@ class ToolsPanel(tk.Frame):
         lines: list[str] = []
         for step in session.last_tool_steps:
             status = "OK" if step.ok else "FAIL"
+            pg = getattr(step, "parallel_group", None)
+            pg_tag = f" · 并行组{pg}" if pg else ""
             lines.append(
-                f"步骤 {step.step} [{status}] {step.tool_name}\n"
+                f"步骤 {step.step} [{status}] {step.tool_name}{pg_tag}\n"
                 f"  参数: {step.arguments}\n"
                 f"  Observation: {step.observation}\n"
             )
@@ -1404,7 +1443,7 @@ class TrajectoryPanel(tk.Frame):
         session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
     ) -> None:
         if not _is_commercial_react_session(session):
-            self._fill(self._trace, "请使用第07篇 v6 或第08篇 v7 版本。")
+            self._fill(self._trace, "请使用第07篇 v6、第08篇 v7 或第09篇 v8 版本。")
             self._fill(self._tools, "—")
             return
         trace = session.runtime_trace
@@ -1415,8 +1454,10 @@ class TrajectoryPanel(tk.Frame):
         lines: list[str] = []
         for step in session.last_tool_steps:
             status = "OK" if step.ok else "FAIL"
+            pg = getattr(step, "parallel_group", None)
+            pg_tag = f" · 并行组{pg}" if pg else ""
             lines.append(
-                f"步骤 {step.step} [{status}] {step.tool_name}\n"
+                f"步骤 {step.step} [{status}] {step.tool_name}{pg_tag}\n"
                 f"  参数: {step.arguments}\n"
                 f"  Observation: {step.observation}\n"
             )
@@ -1679,7 +1720,7 @@ class MechanismDashboard(tk.Frame):
 
         if _is_v3(meta.version_id) or _is_v4(meta.version_id) or _is_v6(
             meta.version_id
-        ) or _is_v7(meta.version_id):
+        ) or _is_v7_or_v8(meta.version_id):
             if meta.role_id:
                 name = meta.role_display_name or meta.role_id
                 ver = f" · v{meta.role_version}" if meta.role_version else ""
@@ -1700,8 +1741,18 @@ class MechanismDashboard(tk.Frame):
             self._set("ver_role_src", "—")
             self._set("ver_route_reason", "—")
 
-        if _is_v6(meta.version_id) or _is_v7(meta.version_id):
-            if _is_v7(meta.version_id):
+        if _is_v6(meta.version_id) or _is_v7_or_v8(meta.version_id):
+            if _is_v8(meta.version_id):
+                self._set_badge("v8 · tool_choice + parallel", C_SUCCESS_BG, C_SUCCESS)
+                self._set(
+                    "ver_structure",
+                    "v7 工具表 + tool_choice / parallel / forced done",
+                )
+                self._set(
+                    "react_tools",
+                    "calculator, read_file, list_dir, write_text, done",
+                )
+            elif _is_v7(meta.version_id):
                 self._set_badge("v7 · 读写 + done", C_SUCCESS_BG, C_SUCCESS)
                 self._set(
                     "ver_structure",
@@ -1722,14 +1773,18 @@ class MechanismDashboard(tk.Frame):
                 wp = getattr(session, "workspace_path", None)
                 self._set(
                     "react_workspace",
-                    str(wp) if wp and _is_v7(meta.version_id) else "—",
+                    str(wp) if wp and _is_v7_or_v8(meta.version_id) else "—",
                 )
                 if session.react_steps_used or session.last_tool_steps:
-                    self._set(
-                        "react_steps",
-                        f"{session.react_steps_used} 轮 LLM，工具 {len(session.last_tool_steps)} 次",
+                    step_line = (
+                        f"{session.react_steps_used} 轮 LLM，工具 {len(session.last_tool_steps)} 次"
                     )
-                    if _is_v7(meta.version_id):
+                    if _is_v8(meta.version_id):
+                        pb = getattr(session, "parallel_batch_count", 0)
+                        if pb:
+                            step_line += f"，并行批 {pb}"
+                    self._set("react_steps", step_line)
+                    if _is_v7_or_v8(meta.version_id):
                         done = session.last_done_ok
                         if done is True:
                             self._set("react_done", "通过", fg=C_SUCCESS)
@@ -2464,7 +2519,7 @@ class MechanismViewerApp:
                     "system",
                     f"[ReAct] {self.session.react_steps_used} 轮 LLM，工具 {n_tools} 次",
                 )
-            if _is_v7(self._version_id) and self.session.last_done_ok is not None:
+            if _is_v7_or_v8(self._version_id) and self.session.last_done_ok is not None:
                 done_txt = (
                     "通过"
                     if self.session.last_done_ok
