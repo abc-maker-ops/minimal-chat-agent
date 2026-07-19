@@ -64,6 +64,10 @@ _langgraph_v10_prompt = _load_lab_module(
     "langgraph_v10_prompt_session",
     _LAB_ROOT / "langgraph_v10" / "prompt_session.py",
 )
+_langgraph_v11_prompt = _load_lab_module(
+    "langgraph_v11_prompt_session",
+    _LAB_ROOT / "langgraph_v11" / "prompt_session.py",
+)
 _react_prompt = _load_lab_module(
     "react_v6_prompt_session",
     _LAB_ROOT / "react_v6" / "prompt_session.py",
@@ -76,6 +80,7 @@ CommercialAgentSession = _react_prompt.CommercialAgentSession
 DeliveryAgentSession = _react_v7_prompt.DeliveryAgentSession
 ToolEngineeredAgentSession = _react_v8_prompt.ToolEngineeredAgentSession
 LangGraphAgentSession = _langgraph_v10_prompt.LangGraphAgentSession
+LangGraphV11Session = _langgraph_v11_prompt.LangGraphAgentSession
 ReactAgentSession = CommercialAgentSession
 list_role_ids = _v3_role_loader.list_role_ids
 
@@ -212,6 +217,11 @@ AGENT_VERSIONS: tuple[AgentVersionSpec, ...] = (
         "第10篇 · LangGraph 图编排",
         "LangChain ChatModel + LangGraph StateGraph + v8 工具表",
     ),
+    AgentVersionSpec(
+        "v11_graph",
+        "第11篇 · 工具封装与图编排进阶",
+        "StructuredTool + tools 并行 + Checkpoint/人审 interrupt",
+    ),
 )
 VERSION_BY_ID = {v.id: v for v in AGENT_VERSIONS}
 LABEL_TO_ID = {v.label: v.id for v in AGENT_VERSIONS}
@@ -333,6 +343,17 @@ VIEWER_PROFILES: dict[str, dict[str, Any]] = {
         "show_trajectory_tab": True,
         "show_raw_tab": True,
     },
+    "viewer11": {
+        "title": "机制查看器 v11",
+        "version_ids": ("v11_graph",),
+        "default_version": "v11_graph",
+        "show_role_tab": False,
+        "show_reasoning_tab": False,
+        "show_quality_tab": False,
+        "show_tools_tab": False,
+        "show_trajectory_tab": True,
+        "show_raw_tab": True,
+    },
 }
 
 
@@ -396,12 +417,21 @@ def _is_v10(version_id: str) -> bool:
     return version_id.startswith("v10_")
 
 
+def _is_v11(version_id: str) -> bool:
+    return version_id.startswith("v11_")
+
+
 def _is_v7_or_v8(version_id: str) -> bool:
     return _is_v7(version_id) or _is_v8(version_id)
 
 
 def _is_react_stack(version_id: str) -> bool:
-    return _is_v7(version_id) or _is_v8(version_id) or _is_v10(version_id)
+    return (
+        _is_v7(version_id)
+        or _is_v8(version_id)
+        or _is_v10(version_id)
+        or _is_v11(version_id)
+    )
 
 
 def _session_llm_rounds(session: Any) -> int:
@@ -421,6 +451,7 @@ def _is_commercial_react_session(
             DeliveryAgentSession,
             ToolEngineeredAgentSession,
             LangGraphAgentSession,
+            LangGraphV11Session,
         ),
     )
 
@@ -433,6 +464,7 @@ def _is_reasoning(version_id: str) -> bool:
         or _is_v7(version_id)
         or _is_v8(version_id)
         or _is_v10(version_id)
+        or _is_v11(version_id)
     )
 
 
@@ -493,6 +525,8 @@ def build_session(
 ) -> AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession:
     if version_id == "v1_minimal":
         return AgentSession()
+    if _is_v11(version_id):
+        return LangGraphV11Session()
     if _is_v10(version_id):
         return LangGraphAgentSession()
     if _is_v8(version_id):
@@ -810,7 +844,9 @@ def startup_message(meta: ViewerMeta) -> str:
             msg += f" 推理: {mode}。"
     elif _is_react_stack(meta.version_id):
         msg += " 一体化运行机制（自动选角、按需比选/精炼）。"
-        if _is_v10(meta.version_id):
+        if _is_v11(meta.version_id):
+            msg += " StructuredTool + 并行 tools + 人审/检查点；详情见「运行轨迹」。"
+        elif _is_v10(meta.version_id):
             msg += " LangGraph 图编排 + v8 工具表；详情见「运行轨迹」。"
         elif _is_v8(meta.version_id):
             msg += " 工具含 tool_choice/parallel + read/write/done；详情见「运行轨迹」。"
@@ -1487,7 +1523,10 @@ class TrajectoryPanel(tk.Frame):
         session: AgentSession | PromptAgentSession | RoleAgentSession | CotAgentSession | None,
     ) -> None:
         if not _is_commercial_react_session(session):
-            self._fill(self._trace, "请使用第07篇 v6、第08篇 v7、第09篇 v8 或第10篇 v10 版本。")
+            self._fill(
+                self._trace,
+                "请使用第07篇 v6、第08篇 v7、第09篇 v8、第10篇 v10 或第11篇 v11 版本。",
+            )
             self._fill(self._tools, "—")
             return
         trace = session.runtime_trace
@@ -1786,7 +1825,17 @@ class MechanismDashboard(tk.Frame):
             self._set("ver_route_reason", "—")
 
         if _is_react_stack(meta.version_id):
-            if _is_v10(meta.version_id):
+            if _is_v11(meta.version_id):
+                self._set_badge("v11 · 工具封装进阶", C_SUCCESS_BG, C_SUCCESS)
+                self._set(
+                    "ver_structure",
+                    "StructuredTool + tools 并行 + human_gate / Checkpoint",
+                )
+                self._set(
+                    "react_tools",
+                    "同 v8 五工具（LC StructuredTool 封装，执行仍 run_tool）",
+                )
+            elif _is_v10(meta.version_id):
                 self._set_badge("v10 · LangGraph", C_SUCCESS_BG, C_SUCCESS)
                 self._set(
                     "ver_structure",
@@ -1838,13 +1887,20 @@ class MechanismDashboard(tk.Frame):
                         pb = getattr(session, "parallel_batch_count", 0)
                         if pb:
                             step_line += f"，并行批 {pb}"
-                    if _is_v10(meta.version_id):
+                    if _is_v10(meta.version_id) or _is_v11(meta.version_id):
                         np = getattr(session, "last_node_path", ()) or ()
                         if np:
                             step_line += f"，图节点 {len(np)} 步"
+                        if _is_v11(meta.version_id):
+                            pg = getattr(session, "last_parallel_group", None)
+                            if pg is not None:
+                                step_line += f"，并行组 {pg}"
                     self._set("react_steps", step_line)
-                    if _is_v7(meta.version_id) or _is_v8(meta.version_id) or _is_v10(
-                        meta.version_id
+                    if (
+                        _is_v7(meta.version_id)
+                        or _is_v8(meta.version_id)
+                        or _is_v10(meta.version_id)
+                        or _is_v11(meta.version_id)
                     ):
                         done = session.last_done_ok
                         if done is True:
@@ -2579,7 +2635,7 @@ class MechanismViewerApp:
             if n_tools:
                 tag = (
                     f"[LangGraph] {rounds} 轮 agent，工具 {n_tools} 次"
-                    if _is_v10(self._version_id)
+                    if _is_v10(self._version_id) or _is_v11(self._version_id)
                     else f"[ReAct] {rounds} 轮 LLM，工具 {n_tools} 次"
                 )
                 self._append_chat("system", tag)
@@ -2587,6 +2643,7 @@ class MechanismViewerApp:
                 _is_v7(self._version_id)
                 or _is_v8(self._version_id)
                 or _is_v10(self._version_id)
+                or _is_v11(self._version_id)
             ) and self.session.last_done_ok is not None:
                 done_txt = (
                     "通过"

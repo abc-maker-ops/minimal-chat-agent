@@ -13,6 +13,7 @@
 | [`react_v7/`](react_v7/) | **第 08 篇 · ReAct 加强 + done 验收** |
 | [`react_v8/`](react_v8/) | **第 09 篇 · tool_choice / parallel / Schema** |
 | [`langgraph_v10/`](langgraph_v10/) | **第 10 篇 · LangChain + LangGraph 图编排** |
+| [`langgraph_v11/`](langgraph_v11/) | **第 11 篇 · StructuredTool + 并行 + 人审/检查点** |
 
 默认对接智谱 **GLM-4.7-Flash**（OpenAI 兼容接口）。API Key 用环境变量 `ZHIPU_API_KEY`，勿提交到 Git。
 
@@ -114,7 +115,18 @@ python minimal_agent.py
 
 工具表经 `bridge_v8` 复用 v8；编排层为 LangGraph `StateGraph`（`agent` ↔ `tools` + `force_done_gate`）。可选：`LANGGRAPH_CHECKPOINT=1` 启用 `MemorySaver`。机制查看器 `mechanism_viewer_v10/`。离线冒烟：`python smoke_test_experiments.py`。
 
-前九篇机制对照仍可用 `mechanism_viewer_v2`～`v8`；第 10 篇用 `mechanism_viewer_v10`。
+## 第 11 篇（工具封装与图编排进阶）
+
+```powershell
+$env:ZHIPU_API_KEY="你的智谱Key"
+cd langgraph_v11
+pip install -r requirements.txt
+python minimal_agent.py
+```
+
+相对 v10：`bind_tools` 改为 LangChain **StructuredTool**；`tools` 节点可并行；`HUMAN_GATE=1` 时写文件/`done` 前 `interrupt` 人审。机制查看器 `mechanism_viewer_v11/`。
+
+前几篇机制对照仍可用 `mechanism_viewer_v2`～`v10`；第 11 篇用 `mechanism_viewer_v11`。
 
 ## 机制查看器
 
@@ -131,6 +143,7 @@ python minimal_agent.py
 | [`mechanism_viewer_v7/`](mechanism_viewer_v7/) | **第 08 篇 · ReAct 加强（运行轨迹 + done）** |
 | [`mechanism_viewer_v8/`](mechanism_viewer_v8/) | **第 09 篇 · 工具工程化（parallel + tool_choice）** |
 | [`mechanism_viewer_v10/`](mechanism_viewer_v10/) | **第 10 篇 · LangGraph 图编排（节点路径 + v8 工具链）** |
+| [`mechanism_viewer_v11/`](mechanism_viewer_v11/) | **第 11 篇 · StructuredTool + 并行 + 人审** |
 
 ## 来源与关注
 
